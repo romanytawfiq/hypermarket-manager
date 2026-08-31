@@ -1,17 +1,18 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
 import { ChevronLeftIcon } from "lucide-react";
+import { iconMap, type NavigationIcon } from "@/lib/navigation";
 import { Card } from "@/components/ui/card";
 
 export function LinkCard({
   href,
-  icon: Icon,
+  icon,
   label,
 }: {
   href: string;
-  icon: LucideIcon;
+  icon: NavigationIcon;
   label: string;
 }) {
+  const Icon = iconMap[icon];
   return (
     <Link href={href} className="group block">
       <Card className="flex items-center justify-between p-4 transition-colors hover:bg-muted/50">

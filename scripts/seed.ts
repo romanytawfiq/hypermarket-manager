@@ -15,14 +15,14 @@ if (existsSync(".env.local")) {
   process.loadEnvFile(".env.local");
 }
 
-const { runSeed } = await import("../src/lib/seed");
-
 async function main() {
+  const { runSeed } = await import("../src/lib/seed");
+
   const result = await runSeed();
   console.log(
     `Seed complete: ${result.permissionsCreated} permission(s) created, ` +
       `${result.rolesUpserted} role(s) upserted, ` +
-      `devOwnerCreated=${result.devOwnerCreated}`,
+      `devOwnerEnsured=${result.devOwnerEnsured}`,
   );
   await mongoose.disconnect();
 }

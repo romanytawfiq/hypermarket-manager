@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { LogOutIcon } from "lucide-react";
 import { logoutAction } from "@/actions/auth-actions";
 import type { AuthUser } from "@/services/auth.service";
-import type { NavItem } from "@/lib/navigation";
+import { iconMap, type NavItem } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -15,6 +15,7 @@ function DesktopNav({ navItems }: { navItems: NavItem[] }) {
     <nav className="flex-1 space-y-1 p-3" aria-label="التنقل الرئيسي">
       {navItems.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        const Icon = iconMap[item.icon];
         return (
           <Link
             key={item.href}
@@ -27,7 +28,7 @@ function DesktopNav({ navItems }: { navItems: NavItem[] }) {
                 : "text-foreground/80 hover:bg-muted hover:text-foreground",
             )}
           >
-            <item.icon className="size-4 shrink-0" aria-hidden />
+            <Icon className="size-4 shrink-0" aria-hidden />
             {item.label}
           </Link>
         );
@@ -99,6 +100,7 @@ function MobileNavLinks({ navItems }: { navItems: NavItem[] }) {
     <>
       {navItems.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        const Icon = iconMap[item.icon];
         return (
           <Link
             key={item.href}
@@ -109,7 +111,7 @@ function MobileNavLinks({ navItems }: { navItems: NavItem[] }) {
               active ? "bg-primary text-primary-foreground" : "text-foreground/80 hover:bg-muted",
             )}
           >
-            <item.icon className="size-4" aria-hidden />
+            <Icon className="size-4" aria-hidden />
             {item.label}
           </Link>
         );

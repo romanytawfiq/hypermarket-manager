@@ -1,10 +1,10 @@
 import { dbConnect } from "@/lib/db";
 import { PermissionModel } from "@/models/permission";
 import { RoleModel } from "@/models/role";
-import { UserModel } from "@/models/user";
+import { UserModel, type UserDocument } from "@/models/user";
 import { PERMISSIONS, type PermissionId } from "@/lib/access-control/permissions";
 import { ROLES, ROLE_LABELS, defaultPermissionsForRole } from "@/lib/access-control/roles";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { isProduction } from "@/lib/env";
 
 /**
@@ -20,7 +20,8 @@ import { isProduction } from "@/lib/env";
 interface SeedResult {
   permissionsCreated: number;
   rolesUpserted: number;
-  devOwnerCreated: boolean;
+  /** True when the dev owner was created or repaired by this run. */
+  devOwnerEnsured: boolean;
 }
 
 const PERMISSION_LABELS: Record<PermissionId, { label: string; scope: string; description: string }> = {
@@ -111,6 +112,13 @@ function readDevOwnerEnv(): SeedEnv | null {
  *
  * The Owner is the only way to reach the highest privilege initially because
  * only an Owner can assign the Owner role. This bootstrap is idempotent.
+ *
+ * If the dev owner already exists, its stored password hash is verified
+ * against `SEED_OWNER_PASSWORD`. When the hash is missing, malformed (e.g. a
+ * plaintext value), or simply wrong, it is re-hashed to a fresh bcrypt hash so
+ * re-running `npm run seed` self-heals a corrupted owner. The password is
+ * never reset to anything other than the developer-supplied
+ * `SEED_OWNER_PASSWORD`, so no secret is hardcoded or weakened.
  */
 export async function seedDevOwner(): Promise<boolean> {
   if (isProduction) return false;
@@ -129,18 +137,35 @@ export async function seedDevOwner(): Promise<boolean> {
     return false;
   }
 
-  const exists = await UserModel.exists({ username: seed.username.toLowerCase() });
-  if (exists) return false;
+  const username = seed.username.toLowerCase();
+  const existing = await UserModel.findOne({ username }).lean<UserDocument>();
+
+  if (!existing) {
+    const passwordHash = await hashPassword(seed.password);
+    await UserModel.create({
+      username,
+      name: seed.name,
+      passwordHash,
+      role: ownerRole._id,
+      active: true,
+      isOwner: true,
+    });
+    return true;
+  }
+
+  // Re-hash when the stored hash cannot be verified against the configured
+  // dev password. `verifyPassword` returns false for plaintext/malformed hashes.
+  const valid = await verifyPassword(seed.password, existing.passwordHash);
+  if (valid) return false;
 
   const passwordHash = await hashPassword(seed.password);
-  await UserModel.create({
-    username: seed.username.toLowerCase(),
-    name: seed.name,
-    passwordHash,
-    role: ownerRole._id,
-    active: true,
-    isOwner: true,
-  });
+  await UserModel.updateOne(
+    { _id: existing._id },
+    { $set: { passwordHash, role: ownerRole._id, active: true, isOwner: true } },
+  );
+  console.warn(
+    "[seed] Repaired dev owner password hash (stored value could not be verified).",
+  );
   return true;
 }
 
@@ -149,7 +174,7 @@ export async function runSeed(): Promise<SeedResult> {
   await dbConnect();
   const permissionsCreated = await seedPermissions();
   const rolesUpserted = await seedRoles();
-  const devOwnerCreated = await seedDevOwner();
+  const devOwnerEnsured = await seedDevOwner();
 
   if (!isProduction) {
     const ownerRole = await RoleModel.findOne({ name: "OWNER" }).select("_id").lean();
@@ -157,9 +182,9 @@ export async function runSeed(): Promise<SeedResult> {
       ? await UserModel.countDocuments({ role: ownerRole._id })
       : 0;
     console.info(
-      `[seed] done. permissionsCreated=${permissionsCreated} rolesUpserted=${rolesUpserted} devOwnerCreated=${devOwnerCreated} activeOwners=${ownerCount}`,
+      `[seed] done. permissionsCreated=${permissionsCreated} rolesUpserted=${rolesUpserted} devOwnerEnsured=${devOwnerEnsured} activeOwners=${ownerCount}`,
     );
   }
 
-  return { permissionsCreated, rolesUpserted, devOwnerCreated };
+  return { permissionsCreated, rolesUpserted, devOwnerEnsured };
 }

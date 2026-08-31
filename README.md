@@ -276,10 +276,27 @@ The project uses [Next.js](https://nextjs.org) with the App Router.
 # Install dependencies (first time)
 npm install
 
+# Seed permissions, roles, and the development Owner
+# (idempotent — safe to re-run; also self-heals a corrupted Owner password)
+npm run seed
+
 # Run the development server
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+### Default development login
+
+The first run of `npm run seed` bootstraps a development Owner from the
+environment (see `.env.example` / `.env.local`):
+
+- Username: `SEED_OWNER_USERNAME` (default `admin`)
+- Password: `SEED_OWNER_PASSWORD` (set this locally; never commit a real password)
+
+The Owner is only created/repaired when `SEED_OWNER_PASSWORD` is set, and it is
+skipped entirely in production. Re-running `npm run seed` verifies the existing
+Owner's password hash and re-hashes it if the stored value cannot be verified,
+so a corrupted/plaintext hash is repaired automatically.
 
 > The application is Arabic-first and RTL. Phases 0–2 are implemented; the foundation, identity/RBAC, and catalog/inventory features are functional.
