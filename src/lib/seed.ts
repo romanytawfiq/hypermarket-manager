@@ -105,19 +105,30 @@ export async function seedPermissions(): Promise<number> {
   return created;
 }
 
-/** Upserts the system roles with their default permission sets. */
+/**
+ * Upserts the system roles with their default permission sets.
+ *
+ * Idempotent: safe to run on every deploy/reseed. For a brand-new role the full
+ * document (including the default permissions) is inserted. For an existing
+ * system role only permissions that are MISSING from the canonical defaults are
+ * added (union) — so permissions introduced by later phases reach roles that
+ * were seeded earlier. Admin-granted extra permissions are preserved, and a
+ * default that an admin deliberately removed is NOT re-imposed (defaults remain
+ * human-editable via `roles.manage`).
+ */
 export async function seedRoles(): Promise<number> {
   let upserted = 0;
   for (const name of ROLES) {
+    const defaults = defaultPermissionsForRole(name);
     const result = await RoleModel.updateOne(
       { name },
       {
         $setOnInsert: {
           name,
           label: ROLE_LABELS[name],
-          permissions: defaultPermissionsForRole(name),
           system: true,
         },
+        $addToSet: { permissions: { $each: defaults } },
       },
       { upsert: true },
     );

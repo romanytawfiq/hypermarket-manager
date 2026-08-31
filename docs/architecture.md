@@ -587,3 +587,11 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 | **9 — Online Store & Delivery** | Public store + fulfillment | 0–2, prior | Online catalog view; search; product pages; cart; checkout; online order lifecycle; reservation; delivery statuses; online payments / COD; tracking; cancellation/refund. |
 | **10 — Reports & Audit** | Complete reporting + auditability | all business | Daily/weekly/monthly/yearly reports; product/category/payment/cashier/supplier/customer/expense/inventory/expiry/profit; audit UI; optional summary collections. |
 | **11 — Production Hardening** | Operational confidence | all | Security headers/CSP; rate limiting; replica-set transactions in prod; backup/restore; index/perf tuning; observability; multi-branch readiness; accessibility/RTL audit. |
+
+### POS Route & RBAC (finalized)
+
+- **Route:** `/pos` — a real dynamic route inside the authenticated `(dashboard)` area (`src/app/(dashboard)/pos/page.tsx`). It renders the existing `PosScreen` and is guarded server-side.
+- **Canonical permissions:** the route, the navigation item, and the cashier workflow all key off the existing `sales.create` permission (sales domain). POS operations reuse `shifts.open`, `customers.credit`, and `receipts.print`. No second `pos.*` permission naming was introduced.
+- **Navigation:** `getNavItems` (`src/lib/navigation.ts`) exposes `نقطة البيع` → `/pos`, filtered by `sales.create` — visibility is only a UX concern; enforcement is server-side.
+- **Enforcement:** the page redirects when the actor lacks `sales.create` (`redirect("/")`); anonymous requests are bounced to `/login` by the `(dashboard)` layout. Actions/services enforce at the boundary via `requirePermission`.
+- **Reseed procedure:** seeding is additive/idempotent — run `npm run seed` (or the deployed seed) again after upgrading to add new phase permissions to already-seeded roles; it never removes admin-granted permissions or re-imposes deliberately removed defaults.

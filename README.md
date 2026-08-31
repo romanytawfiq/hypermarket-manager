@@ -286,6 +286,8 @@ npm install
 
 # Seed permissions, roles, and the development Owner
 # (idempotent — safe to re-run; also self-heals a corrupted Owner password)
+# Re-running adds any newly-introduced phase permissions to already-seeded
+# roles (additive merge) without removing manual role edits.
 npm run seed
 
 # Run the development server
