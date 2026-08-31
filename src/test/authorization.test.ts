@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { AppError } from "@/lib/errors";
 import { hasPermission } from "@/lib/access-control/permission";
 import { PERMISSIONS } from "@/lib/access-control/permissions";
+import { defaultPermissionsForRole } from "@/lib/access-control/roles";
 import {
   requirePermission,
   can,
@@ -21,12 +22,16 @@ describe("authorization / RBAC enforcement", () => {
     }
   });
 
-  it("grants a Cashier no permissions", async () => {
+  it("grants a Cashier exactly the POS/shift permissions", async () => {
     const cashier = await createUser({ username: "cashier", role: "CASHIER" });
     const actor = await buildAuthUser(cashier);
+    const expected = new Set(defaultPermissionsForRole("CASHIER"));
     for (const permission of PERMISSIONS) {
-      expect(hasPermission(actor, permission, actor.permissions)).toBe(false);
+      expect(hasPermission(actor, permission, actor.permissions)).toBe(expected.has(permission));
     }
+    // A cashier must still NOT hold admin/inventory-management powers.
+    expect(hasPermission(actor, "users.read", actor.permissions)).toBe(false);
+    expect(hasPermission(actor, "inventory.adjust", actor.permissions)).toBe(false);
   });
 
   it("requirePermission passes for an authorized actor", async () => {

@@ -864,6 +864,149 @@ export async function removeReturnedStock(
   }
 }
 
+/** One sale line's inventory effect (validated server-side before this call). */
+export interface SaleStockItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  trackExpiry: boolean;
+}
+
+/**
+ * Decrements inventory for a completed retail sale.
+ *
+ * Each sale line produces an append-only SALE stock movement and an atomic,
+ * versioned decrement of the InventoryState cache (BR-024, BR-018/BR-020). For
+ * expiry-tracked products, the quantity is drawn from non-expired batches
+ * earliest-first (FEFO, BR-025/BR-029); expired batches are never sold
+ * (BR-028). The negative-stock guard rejects overselling (BR-023).
+ *
+ * Runs atomically with the caller's sale transaction when `options.session` is
+ * provided, so the sale + payment + inventory either commit or roll back
+ * together (BR-021, architecture §9 single aggregate / transaction boundary).
+ * Requires `sales.create` (already enforced by the sales service when joining
+ * its transaction; kept here defensively when called standalone).
+ */
+export async function consumeStockForSale(
+  actor: AuthUser | null,
+  saleItems: SaleStockItem[],
+  options: { referenceId?: string; session?: mongoose.ClientSession },
+): Promise<void> {
+  const authed = requirePermission(actor, "sales.create");
+  await dbConnect();
+
+  const itemList = [...saleItems].filter((it) => it.quantity > 0);
+  if (itemList.length === 0) {
+    throw new AppError("VALIDATION", "لا توجد كميات للبيع");
+  }
+
+  const work = async (session: mongoose.ClientSession) => {
+    for (const item of itemList) {
+      const product = await ProductModel.findById(item.productId)
+        .session(session)
+        .select("name trackExpiry")
+        .lean<{ name: string; trackExpiry: boolean }>();
+      if (!product) {
+        throw new AppError("NOT_FOUND", "المنتج غير موجود");
+      }
+
+      const spy = await InventoryStateModel.findOne({ product: item.productId })
+        .session(session)
+        .lean<{ version: number }>();
+      if (!spy) {
+        throw new AppError("NOT_FOUND", "لا توجد حالة مخزون لهذا المنتج");
+      }
+
+      const updated = await InventoryStateModel.findOneAndUpdate(
+        { product: item.productId, version: spy.version },
+        {
+          $inc: { onHand: -item.quantity },
+          $set: { version: spy.version + 1 },
+        },
+        { returnDocument: "after", session, runValidators: false },
+      )
+        .select("onHand")
+        .lean<{ onHand: number }>();
+      if (!updated) {
+        throw new AppError(
+          "CONFLICT",
+          "تعذّر تحديث المخزون لأن بياناته تغيّرت. حاول مرة أخرى",
+        );
+      }
+      if (updated.onHand < 0) {
+        throw new AppError(
+          "CONFLICT",
+          `لا يوجد مخزون كافٍ من '${item.productName}' لإتمام عملية البيع`,
+        );
+      }
+
+      // FEFO: draw expiry-tracked stock from non-expired batches, earliest first.
+      if (item.trackExpiry) {
+        const now = new Date();
+        let remaining = item.quantity;
+        const batches = await ProductBatchModel.find({
+          product: item.productId,
+          quantity: { $gt: 0 },
+          expiryDate: { $gt: now },
+        })
+          .session(session)
+          .sort({ expiryDate: 1 })
+          .select("_id quantity");
+        for (const batch of batches) {
+          if (remaining <= 0) break;
+          const take = Math.min(batch.quantity, remaining);
+          remaining -= take;
+          await ProductBatchModel.updateOne(
+            { _id: batch._id },
+            { $inc: { quantity: -take } },
+            { session },
+          );
+        }
+        if (remaining > 0) {
+          throw new AppError(
+            "CONFLICT",
+            `لا يوجد مخزون كافٍ من '${item.productName}' لإتمام عملية البيع`,
+          );
+        }
+      }
+
+      await StockMovementModel.create(
+        [
+          {
+            product: item.productId,
+            type: "SALE" as StockMovementType,
+            quantity: -item.quantity,
+            reason: `بيع: ${item.productName} (${item.quantity})`,
+            referenceType: "SALE",
+            referenceId: options.referenceId,
+            actorId: authed.id,
+            actorUsername: authed.username,
+          },
+        ],
+        { session },
+      );
+    }
+
+    await recordAudit({
+      actorId: authed.id,
+      actorUsername: authed.username,
+      action: "inventory.sale",
+      entity: "sale",
+      entityId: options.referenceId,
+      after: {
+        referenceId: options.referenceId,
+        items: itemList.map((it) => ({ productId: it.productId, quantity: it.quantity })),
+      },
+    });
+  };
+
+  if (options.session) {
+    await work(options.session);
+  } else {
+    await withTransaction(work);
+  }
+}
+
 /** Lists a product's batches (with remaining quantity). Requires `inventory.view_expiry`. */
 export async function listProductBatches(
   actor: AuthUser | null,

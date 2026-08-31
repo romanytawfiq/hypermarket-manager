@@ -52,6 +52,21 @@ export const PERMISSIONS = [
   "supplier_payments.read",
   "supplier_payments.create",
 
+  // POS, Payments & Cashier Shifts (Phase 4)
+  "sales.read",
+  "sales.create",
+
+  "payments.read",
+
+  "shifts.read",
+  "shifts.open",
+  "shifts.close",
+
+  "cash_movements.read",
+  "cash_movements.create",
+
+  "receipts.print",
+
   "reports.view",
 
   "settings.view",

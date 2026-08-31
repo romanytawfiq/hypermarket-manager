@@ -78,6 +78,16 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "purchases.return",
     "supplier_payments.read",
     "supplier_payments.create",
+    // POS, Payments & Shifts
+    "sales.read",
+    "sales.create",
+    "payments.read",
+    "shifts.read",
+    "shifts.open",
+    "shifts.close",
+    "cash_movements.read",
+    "cash_movements.create",
+    "receipts.print",
   ],
   WAREHOUSE_EMPLOYEE: [
     "products.read",
@@ -117,8 +127,23 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "purchases.read",
     "supplier_payments.read",
     "supplier_payments.create",
+    // POS, Payments & Shifts (read + receipts)
+    "sales.read",
+    "payments.read",
+    "shifts.read",
+    "receipts.print",
   ],
-  CASHIER: [],
+  CASHIER: [
+    // POS, Payments & Cashier Shifts (Phase 4)
+    "sales.read",
+    "sales.create",
+    "payments.read",
+    "shifts.read",
+    "shifts.open",
+    "shifts.close",
+    "cash_movements.read",
+    "receipts.print",
+  ],
   BARISTA: [],
 };
 

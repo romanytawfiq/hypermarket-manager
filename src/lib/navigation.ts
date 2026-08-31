@@ -4,6 +4,8 @@ import {
   ListTreeIcon,
   PackageIcon,
   PackageSearchIcon,
+  ReceiptIcon,
+  SheetIcon,
   ShoppingCartIcon,
   TagsIcon,
   TruckIcon,
@@ -29,6 +31,9 @@ import type { PermissionId } from "@/lib/access-control/permissions";
 /** Serialized identifier for a navigation icon (safe to send to a Client Component). */
 export type NavigationIcon =
   | "dashboard"
+  | "pos"
+  | "sales"
+  | "shifts"
   | "products"
   | "categories"
   | "brands"
@@ -43,6 +48,9 @@ export type NavigationIcon =
 /** Latest set of icons used by navigation; rendered by the client and server. */
 export const iconMap: Record<NavigationIcon, LucideIcon> = {
   dashboard: LayoutDashboardIcon,
+  pos: ShoppingCartIcon,
+  sales: ReceiptIcon,
+  shifts: SheetIcon,
   products: PackageIcon,
   categories: ListTreeIcon,
   brands: TagsIcon,
@@ -65,6 +73,10 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "الرئيسية", icon: "dashboard" },
+  // POS / Sales
+  { href: "/pos", label: "نقطة البيع", icon: "pos", permission: "sales.create" },
+  { href: "/sales", label: "المبيعات", icon: "sales", permission: "sales.read" },
+  { href: "/shifts", label: "الورديات", icon: "shifts", permission: "shifts.read" },
   // Catalog
   { href: "/products", label: "المنتجات", icon: "products", permission: "products.read" },
   { href: "/categories", label: "الفئات", icon: "categories", permission: "categories.read" },
