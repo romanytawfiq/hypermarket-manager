@@ -1,5 +1,8 @@
 import {
   BoxesIcon,
+  CalculatorIcon,
+  ContactIcon,
+  HandCoinsIcon,
   LayoutDashboardIcon,
   ListTreeIcon,
   PackageIcon,
@@ -43,6 +46,9 @@ export type NavigationIcon =
   | "replenishment"
   | "suppliers"
   | "purchases"
+  | "customers"
+  | "expenses"
+  | "accounting"
   | "users";
 
 /** Latest set of icons used by navigation; rendered by the client and server. */
@@ -60,6 +66,9 @@ export const iconMap: Record<NavigationIcon, LucideIcon> = {
   replenishment: BoxesIcon,
   suppliers: TruckIcon,
   purchases: ShoppingCartIcon,
+  customers: ContactIcon,
+  expenses: HandCoinsIcon,
+  accounting: CalculatorIcon,
   users: UsersIcon,
 };
 
@@ -89,6 +98,11 @@ export const NAV_ITEMS: NavItem[] = [
   // Suppliers & Purchasing
   { href: "/suppliers", label: "الموردون", icon: "suppliers", permission: "suppliers.read" },
   { href: "/purchases", label: "المشتريات", icon: "purchases", permission: "purchases.read" },
+  // Customers & Credit / Receivables (Phase 5)
+  { href: "/customers", label: "العملاء", icon: "customers", permission: "customers.read" },
+  // Expenses & Accounting (Phase 6)
+  { href: "/expenses", label: "المصروفات", icon: "expenses", permission: "expenses.read" },
+  { href: "/accounting", label: "المحاسبة", icon: "accounting", permission: "accounting.read" },
   // Admin
   { href: "/users", label: "المستخدمون", icon: "users", permission: "users.read" },
 ];

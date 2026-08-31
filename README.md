@@ -6,8 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 2 Complete**
-> Phases 0, 1, and 2 are implemented. See [Development Status](#development-status).
+> **Status: Phase 6 Complete**
+> Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). See [Development Status](#development-status).
 
 ---
 
@@ -233,17 +233,17 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-Phases 0, 1, and 2 are implemented and the test suite passes (7 files, 53 tests).
+Phases 0–6 are implemented and the test suite passes (96 tests across 13 files).
 
 | Phase | Status |
 |-------|--------|
 | **0 — Foundation** | ✅ Complete |
 | **1 — Identity & RBAC** | ✅ Complete |
 | **2 — Catalog & Inventory Core** | ✅ Complete |
-| **3 — Suppliers & Purchasing** | Planned |
-| **4 — POS, Payments & Cashier Shifts** | Planned |
-| **5 — Customer Credit & Receivables** | Planned |
-| **6 — Expenses & Accounting** | Planned |
+| **3 — Suppliers & Purchasing** | ✅ Complete |
+| **4 — POS, Payments & Cashier Shifts** | ✅ Complete |
+| **5 — Customer Credit & Receivables** | ✅ Complete |
+| **6 — Expenses & Accounting** | ✅ Complete |
 | **7 — Café / KDS** | Planned |
 | **8 — Printing** | Planned |
 | **9 — Online Store & Delivery** | Planned |
@@ -252,17 +252,25 @@ Phases 0, 1, and 2 are implemented and the test suite passes (7 files, 53 tests)
 
 ### Phase 2 — Catalog & Inventory Core (Implemented)
 
-Phase 2 delivers the product catalog and transaction-driven inventory engine:
+- **Catalog:** Product, Category, and Brand CRUD with deactivation (not deletion). Sparse-unique barcode/SKU, configurable pricing, minimum stock, expiry tracking, online visibility.
+- **Inventory:** Transaction-driven — every change writes an append-only `StockMovement` plus an atomic, versioned `InventoryState` update (optimistic concurrency) inside a MongoDB transaction. Adjustments, counts, damage, expiry disposal, low/out/replenishment, expiry monitoring, movement history.
+- **Validation:** Shared Zod schemas re-validated server-side. **Authorization:** enforced at the service boundary.
 
-- **Catalog:** Product, Category, and Brand CRUD with deactivation (not deletion) to preserve historical references. Products have sparse-unique barcode/SKU, required category, optional brand, configurable pricing, minimum stock threshold, expiry tracking flag, and online visibility flag.
-- **Inventory strategy:** Transaction-driven — stock is never an isolated editable number. Every change creates an append-only `StockMovement` record plus an atomic, versioned `InventoryState` update with optimistic concurrency (`version` field). Multi-document changes run in a MongoDB transaction.
-- **Sellable stock:** Non-expiry products → `InventoryState.onHand`. Expiry-tracked products → sum of non-expired `ProductBatch` quantities.
-- **Inventory operations:** Manual adjustment (signed delta), physical stock count (reconciliation), damage recording (`onHand` → `nonSellable`), expiry disposal (only expired batches), low-stock / out-of-stock / replenishment queries, expiry batch monitoring, paginated movement history, product batch listing.
-- **Stock rules:** `EXPIRING_SOON_DAYS = 30`; low-stock = `sellable <= minimumStock`; out-of-stock = `sellable <= 0`; replenishment = `max(0, minimumStock - sellable)`.
-- **Permissions:** Granular Phase 2 permissions (`products.*`, `categories.*`, `brands.*`, `inventory.*`) with role defaults: MANAGER and WAREHOUSE_EMPLOYEE have full access; ACCOUNTANT has read-only access; CASHIER and BARISTA have none. Authorization enforced server-side.
-- **Validation:** Shared Zod schemas (`src/lib/validations/catalog.ts`, `src/lib/validations/inventory.ts`) with server-side re-validation.
-- **UI:** Arabic-first RTL pages for products, categories, brands, inventory overview, movements, expiry, and replenishment under `src/app/(dashboard)/` with components in `src/components/catalog/` and `src/components/inventory/`.
-- **Tests:** `catalog.test.ts` and `inventory.test.ts`; full suite (7 files, 53 tests) passes.
+### Phase 3 — Suppliers & Purchasing (Implemented)
+
+Supplier accounts, purchases and receiving (stock in), supplier ledger + outstanding payable (ledger-derived), supplier payments (cash or credit), supplier returns.
+
+### Phase 4 — POS, Payments & Cashier Shifts (Implemented)
+
+Full cashier POS: product search/scan, cart and quantities, mixed payments across methods (cash, cards, InstaPay, Vodafone Cash), cash tendered + change, thermal receipt, sequential invoices. Cashier shifts: open with opening cash, expected-cash reconciliation, CASH_IN/CASH_OUT/EXPENSE/ADJUSTMENT movements, close variance. A POS completeness audit confirmed the end-to-end flow (login → open shift → sell → pay → receipt → new sale).
+
+### Phase 5 — Customer Credit & Receivables (Implemented)
+
+Customer management, credit sales, customer ledger (source of truth for balances), customer payments, credit limits enforced server-side.
+
+### Phase 6 — Expenses & Accounting (Implemented)
+
+Configurable expense categories and an expenses log (`EXP-YYYYMMDD-NNNN`, idempotency-protected). A cash expense linked to an OPEN shift records an `EXPENSE` cash movement so shift reconciliation accounts for it. An accounting overview aggregates the real persisted transactions (no second ledger): sales total/collected/count + payment-method breakdown, purchases, expenses, gross & net profit (preliminary), current receivables/payables, and physical cash flow (cash strictly separated from card/wallet/Instapay). Access gated by `expenses.*` / `accounting.read` permissions.
 
 The phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
 
@@ -299,4 +307,4 @@ skipped entirely in production. Re-running `npm run seed` verifies the existing
 Owner's password hash and re-hashes it if the stored value cannot be verified,
 so a corrupted/plaintext hash is repaired automatically.
 
-> The application is Arabic-first and RTL. Phases 0–2 are implemented; the foundation, identity/RBAC, and catalog/inventory features are functional.
+> The application is Arabic-first and RTL. Phases 0–6 are implemented; the foundation, identity/RBAC, catalog/inventory, suppliers/purchasing, POS & shifts, customer credit, and expenses & accounting features are functional.

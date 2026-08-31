@@ -78,6 +78,21 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "purchases.return",
     "supplier_payments.read",
     "supplier_payments.create",
+    // Customers & Credit / Receivables (Phase 5)
+    "customers.read",
+    "customers.create",
+    "customers.update",
+    "customers.disable",
+    "customers.view_ledger",
+    "customers.credit",
+    "customer_payments.read",
+    "customer_payments.create",
+    // Expenses & Accounting (Phase 6)
+    "expense_categories.read",
+    "expense_categories.manage",
+    "expenses.read",
+    "expenses.create",
+    "accounting.read",
     // POS, Payments & Shifts
     "sales.read",
     "sales.create",
@@ -127,6 +142,15 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "purchases.read",
     "supplier_payments.read",
     "supplier_payments.create",
+    // Customers & Credit / Receivables (Phase 5) — read visibility
+    "customers.read",
+    "customers.view_ledger",
+    "customer_payments.read",
+    // Expenses & Accounting (Phase 6) — read visibility + expense entry
+    "expense_categories.read",
+    "expenses.read",
+    "expenses.create",
+    "accounting.read",
     // POS, Payments & Shifts (read + receipts)
     "sales.read",
     "payments.read",
@@ -143,6 +167,11 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "shifts.close",
     "cash_movements.read",
     "receipts.print",
+    // Customers & Credit / Receivables (Phase 5) — on-account sales + collection
+    "customers.read",
+    "customers.credit",
+    "customer_payments.read",
+    "customer_payments.create",
   ],
   BARISTA: [],
 };

@@ -5,8 +5,10 @@ import { requirePermission } from "@/services/authorization.service";
 import type { AuthUser } from "@/services/auth.service";
 import { recordAudit } from "@/services/audit.service";
 import { CashierShiftModel } from "@/models/cashier-shift";
-import { SaleModel, type Payment, type SaleDocument } from "@/models/sale";
+import { SaleModel, type Payment, type SaleDocument, type SalePaymentState } from "@/models/sale";
 import { ProductModel } from "@/models/product";
+import { CustomerModel } from "@/models/customer";
+import { CustomerLedgerModel } from "@/models/customer-ledger";
 import { nextSequenceValue } from "@/models/sequence";
 import { consumeStockForSale, getSellableStock } from "@/services/inventory.service";
 import { isCashMethod, paymentMethodLabel, type PaymentMethod } from "@/lib/sales/constants";
@@ -52,9 +54,12 @@ export interface SaleDto {
   invoiceNumber: string;
   cashier: { id: string; username: string };
   shiftId: string;
+  customerId: string;
   customerName: string;
   items: SaleItemDto[];
   totalAmount: number;
+  totalPaid: number;
+  balanceDue: number;
   paymentState: string;
   payments: PaymentDto[];
   status: string;
@@ -81,6 +86,7 @@ function toSaleDto(sale: SaleDocument): SaleDto {
     invoiceNumber: sale.invoiceNumber,
     cashier: { id: sale.cashier?.id ?? "", username: sale.cashier?.username ?? "" },
     shiftId: sale.shift.toString(),
+    customerId: sale.customer?.id ?? "",
     customerName: sale.customer?.name ?? "",
     items: (sale.items ?? []).map((i) => ({
       productId: (i.product as { toString?: () => string } | string)?.toString?.() ?? String(i.product),
@@ -92,6 +98,8 @@ function toSaleDto(sale: SaleDocument): SaleDto {
       discount: i.discount,
     })),
     totalAmount: sale.totalAmount,
+    totalPaid: sale.totalPaid ?? sale.payments?.reduce((s, p) => s + p.amount, 0) ?? 0,
+    balanceDue: sale.balanceDue ?? 0,
     paymentState: sale.paymentState,
     payments: (sale.payments ?? []).map((p) => ({
       method: p.method,
@@ -112,6 +120,18 @@ async function activeShiftId(cashierId: string): Promise<string | null> {
     .select("_id")
     .lean<{ _id: mongoose.Types.ObjectId }>();
   return shift ? shift._id.toString() : null;
+}
+
+/** Outstanding receivable balance for a customer from the ledger (server-derived). */
+async function outstandingBalance(
+  customerId: string,
+  session?: mongoose.ClientSession,
+): Promise<number> {
+  const rows = await CustomerLedgerModel.aggregate<{ total: number }>([
+    { $match: { customer: { $in: [new mongoose.Types.ObjectId(customerId)] } } },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ], { session });
+  return Math.max(0, rows[0]?.total ?? 0);
 }
 
 /**
@@ -271,11 +291,63 @@ export async function createSale(
       });
     }
 
-    // Validate payments: must fully pay the total (BR-009); Phase 4 is PAID-only.
+    // Payments are server-authoritative. Phase 4 requires full payment; Phase 5
+    // allows an on-account (credit) sale to be partially or fully unpaid
+    // (BR-011/BR-012), with the remainder becoming a receivable.
     const payments: Array<{ method: PaymentMethod; amount: number; status: "CONFIRMED" }> =
       input.payments.map((p) => ({ method: p.method as PaymentMethod, amount: p.amount, status: "CONFIRMED" }));
     const paidTotal = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100;
-    if (Math.abs(paidTotal - totalAmount) > 0.001) {
+    if (paidTotal > totalAmount + 0.001) {
+      throw new AppError("VALIDATION", "المبلغ المدفوع يتجاوز إجمالي الفاتورة");
+    }
+
+    // Resolve the linked customer + enforce credit policy server-side (BR-001,
+    // BR-011, architecture §12 credit approval / §25 credit limit).
+    let linkedCustomer: {
+      customer: { _id: mongoose.Types.ObjectId; name: string; active: boolean; allowCredit: boolean; creditLimit: number | null };
+    } | null = null;
+    if (input.customerId) {
+      const customer = await CustomerModel.findById(input.customerId)
+        .session(session)
+        .select("name active allowCredit creditLimit")
+        .lean<{
+          _id: mongoose.Types.ObjectId;
+          name: string;
+          active: boolean;
+          allowCredit: boolean;
+          creditLimit: number | null;
+        }>();
+      if (!customer) throw new AppError("NOT_FOUND", "العميل غير موجود");
+      if (!customer.active) throw new AppError("CONFLICT", "العميل غير نشط");
+      linkedCustomer = { customer };
+    }
+
+    const onCredit = Boolean(input.onCredit);
+    let balanceDue = 0;
+    let paymentState: SalePaymentState = "PAID";
+
+    if (onCredit) {
+      if (!linkedCustomer) {
+        throw new AppError("VALIDATION", "اختر العميل للبيع على الحساب");
+      }
+      const { customer } = linkedCustomer;
+      if (!customer.allowCredit) {
+        throw new AppError("CONFLICT", "لا يُسمح بهذا العميل بالشراء على الحساب");
+      }
+      balanceDue = Math.round((totalAmount - paidTotal) * 100) / 100;
+      paymentState = Math.abs(paidTotal - totalAmount) < 0.001 ? "PAID" : paidTotal === 0 ? "UNPAID" : "PARTIAL";
+
+      // Enforce a per-customer credit cap when configured (default null = unlimited).
+      if (customer.creditLimit != null && balanceDue > 0) {
+        const outstanding = await outstandingBalance(customer._id.toString(), session);
+        if (outstanding + balanceDue > customer.creditLimit + 0.001) {
+          throw new AppError(
+            "CONFLICT",
+            `تجاوز ذلك حد الائتمان المسموح للعميل (${customer.creditLimit.toLocaleString("ar-EG")} ج.م)`,
+          );
+        }
+      }
+    } else if (Math.abs(paidTotal - totalAmount) > 0.001) {
       throw new AppError(
         "VALIDATION",
         `المبلغ المدفوع (${paidTotal.toLocaleString("ar-EG")} ج.م) لا يساوي إجمالي الفاتورة (${totalAmount.toLocaleString("ar-EG")} ج.م)`,
@@ -306,7 +378,11 @@ export async function createSale(
           invoiceNumber,
           cashier: { id: authed.id, username: authed.username },
           shift: new mongoose.Types.ObjectId(shiftId),
-          customer: input.customerName ? { name: input.customerName.trim() } : undefined,
+          customer: linkedCustomer
+            ? { id: linkedCustomer.customer._id.toString(), name: linkedCustomer.customer.name }
+            : input.customerName
+              ? { name: input.customerName.trim() }
+              : undefined,
           items: saleItems.map((i) => ({
             product: i.product,
             productName: i.productName,
@@ -317,7 +393,9 @@ export async function createSale(
             discount: 0,
           })),
           totalAmount,
-          paymentState: "PAID",
+          totalPaid: paidTotal,
+          balanceDue,
+          paymentState,
           payments,
           status: "COMPLETED",
           cashTendered,
@@ -342,6 +420,24 @@ export async function createSale(
       { referenceId: sale._id.toString(), session },
     );
 
+    // Create a customer receivable (CREDIT_SALE ledger entry) for the unpaid
+    // remainder (BR-012). The ledger is the authoritative source of the balance.
+    if (linkedCustomer && balanceDue > 0) {
+      await CustomerLedgerModel.create(
+        [
+          {
+            customer: linkedCustomer.customer._id,
+            type: "CREDIT_SALE" as const,
+            amount: balanceDue,
+            referenceType: "SALE",
+            referenceId: sale._id.toString(),
+            description: `بيع آجل (${invoiceNumber})`,
+          },
+        ],
+        { session },
+      );
+    }
+
     await recordAudit({
       actorId: authed.id,
       actorUsername: authed.username,
@@ -352,6 +448,10 @@ export async function createSale(
         invoiceNumber,
         shiftId,
         totalAmount,
+        paidTotal,
+        balanceDue,
+        paymentState,
+        customerId: linkedCustomer?.customer._id.toString(),
         payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
         itemCount: saleItems.length,
       },

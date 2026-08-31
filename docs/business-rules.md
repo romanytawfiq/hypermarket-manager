@@ -575,6 +575,30 @@ Important financial, inventory, permission, and operational actions should be au
 
 ---
 
+# 20b. Expenses & Accounting (Phase 6)
+
+## BR-062 — Expenses Are Financial Transactions
+
+An expense is persisted as a financial transaction, never a UI-only number. It carries an `expenseNumber` (`EXP-YYYYMMDD-NNNN`), a category, an amount, a payment method, a business date, and the acting user. Approved categories are configurable buckets (rent, utilities, salaries, maintenance, other); a category may be disabled but never deleted, preserving history.
+
+## BR-063 — Cash Expense Reconciliation
+
+When an expense is paid in cash (`CASH`) AND linked to an OPEN cashier shift, an `EXPENSE` cash movement is recorded transactionally so the shift's expected-cash formula accounts for the payment (BR-037). A closed shift is never mutated. Non-cash expenses never produce a cash movement.
+
+## BR-064 — Accounting Is a Read/Analysis Layer
+
+The accounting overview aggregates the existing, persisted transactions directly. It introduces no second ledger, so every figure agrees with the source of truth. Period figures (sales, purchases, expenses, cash flow) honor the requested date range; receivables/payables are current outstanding balances across all history.
+
+## BR-065 — Physical Cash Is Distinct
+
+Cash flow strictly separates physical cash from card / wallet / Instapay. Only `CASH` payments and `CASH_IN`/`CASH_OUT` movements affect the physical-cash totals. Supplier payments are counted as cash only when their method label is the Arabic cash label ("نقدي"). Non-cash methods never count as till cash (BR-001).
+
+## BR-066 — Preliminary Profit
+
+Gross profit = sales revenue − COGS (from sale-item cost snapshots). Net profit = gross profit − expenses. These are labeled preliminary because the MVP does not yet model sales/purchase returns; they are displayed only because cost data is stored per sale item.
+
+---
+
 # 21. Business Decisions Still Required
 
 The following rules must be explicitly decided before implementation of the relevant features.
@@ -582,13 +606,13 @@ The following rules must be explicitly decided before implementation of the rele
 | Decision              | Possible Choices                          | Architectural Impact             | Phase 2 Status |
 | --------------------- | ----------------------------------------- | -------------------------------- | -------------- |
 | Negative stock        | Allowed / Not allowed                     | Inventory validation             | **Resolved:** Disallowed; `onHand` must not go negative (BR-023). |
-| Customer credit limit | Unlimited / Fixed limit / Per-customer    | Customer model + sale validation | Pending |
-| Credit approval       | Cashier / Manager / Rule-based            | Authorization                    | Pending |
+| Customer credit limit | Unlimited / Fixed limit / Per-customer    | Customer model + sale validation | **Resolved (Phase 5):** Per-customer `creditLimit`, default unlimited; enforced server-side on credit sales (BR-011). |
+| Credit approval       | Cashier / Manager / Rule-based            | Authorization                    | **Resolved (Phase 5):** No approval workflow in MVP; credit extended to active customers by permission holders within a configured limit. Manager-approval reserved as a future enhancement. |
 | Returns               | Cashier / Manager / Restricted            | Permissions                      | Pending |
 | Supplier returns      | Supported / Not supported                 | Inventory + payable logic        | Pending |
 | Discounts             | None / Invoice / Item / Customer-specific | Pricing                          | Pending |
 | VAT                   | Required / Not required                   | Financial calculations           | Pending |
-| Shift expense         | Allowed / Separate workflow               | Cash reconciliation              | Pending |
+| Shift expense         | Allowed / Separate workflow               | Cash reconciliation              | **Resolved (Phase 6):** Expenses are first-class financial transactions. A cash expense linked to an OPEN shift produces an EXPENSE cash movement so the shift's expected cash accounts for it; a closed shift is never mutated. |
 | Multiple open shifts  | Allowed / Not allowed                     | Shift constraints                | Pending |
 | Café ingredients      | Track / Do not track                      | Inventory model                  | Pending |
 | Online payment        | Supported / Not supported                 | Order state                      | Pending |

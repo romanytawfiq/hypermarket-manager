@@ -735,6 +735,44 @@ Authorized employees can update delivery status.
 
 ---
 
+# 25b. Expenses & Accounting (Phase 6)
+
+*Phase 6 — Implemented.*
+
+## REQ-EXP-001
+
+Authorized employees can record operating expenses with a category, amount, payment method, date, and optional notes.
+
+## REQ-EXP-002
+
+Expense categories are configurable. A category may be disabled but never deleted, preserving history.
+
+## REQ-EXP-003
+
+Expenses are persisted as financial transactions with a sequential `EXP-YYYYMMDD-NNNN` number and an idempotency key that prevents duplicate submission on retry.
+
+## REQ-EXP-004
+
+A cash expense linked to an OPEN shift produces an EXPENSE cash movement so the shift's expected cash accounts for it. Non-cash expenses produce no cash movement; closed shifts are never mutated.
+
+## REQ-EXP-005
+
+Users with the `expenses.read` permission can view, filter (by date and category), and paginate the expense log. Creation requires `expenses.create`.
+
+## REQ-ACC-001
+
+An accounting overview aggregates the real, persisted transactions (sales, purchases, expenses) — it introduces no second ledger.
+
+## REQ-ACC-002
+
+The overview reports sales (total, collected, count), purchases (total, cash paid), expenses (total, cash), gross and net profit (preliminary), current receivables and payables, and physical cash flow (in vs out), distinguishing physical cash from card/wallet/Instapay.
+
+## REQ-ACC-003
+
+Access to the accounting overview requires `accounting.read`.
+
+---
+
 # 26. Auditability
 
 ## REQ-AUDIT-001

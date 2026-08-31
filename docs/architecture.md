@@ -581,7 +581,7 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 | **3 — Suppliers & Purchasing** | Receive stock, track payable | 0–2 | Supplier; Purchase/PurchaseItem; receiving; supplier ledger + payable; payments; supplier returns. |
 | **4 — POS, Payments & Cashier Shifts** | The core money path | 0–3 | POS screen; mixed payments; credit sales; returns/refunds; shift open/close; cash movements; variance; basic receipt. |
 | **5 — Customer Credit & Receivables** | Customer accounts, credit, collections | 0–4 | Customer; customer ledger; credit limits/approval; payment UI; balance reporting. |
-| **6 — Expenses & Accounting** | Expenses and accounting overview | 0–5 | Expense model + categories; consolidated accounting screens. |
+| **6 — Expenses & Accounting** | Expenses and accounting overview | 0–5 | Expense model + categories; consolidated accounting screens. ✅ **Implemented** |
 | **7 — Café / KDS** | Café orders + barista board | 0, 2 | CafeOrder state machine + history; cashier creation; barista board; SSE/outbox realtime; reconnect/reconcile. |
 | **8 — Printing** | Production thermal receipts | 0–7 | 58/80mm layouts; receipt models; preview; later ESC/POS. |
 | **9 — Online Store & Delivery** | Public store + fulfillment | 0–2, prior | Online catalog view; search; product pages; cart; checkout; online order lifecycle; reservation; delivery statuses; online payments / COD; tracking; cancellation/refund. |

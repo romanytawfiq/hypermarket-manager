@@ -370,7 +370,12 @@ Potential information:
 
 ## CustomerAccountTransaction
 
-Conceptually represents customer financial activity.
+Represents customer financial activity and is persisted as the append-only
+**`CustomerLedger`** collection (Phase 5 decision, mirroring the supplier
+ledger). Every entry records a signed `amount`, a `type` (`CREDIT_SALE`,
+`PAYMENT`, `ADJUSTMENT`), a `referenceId`, and a timestamp. The outstanding
+receivable balance is the **sum of these entries** — never stored on the
+customer and never trusted from the client.
 
 Possible sources:
 
@@ -379,25 +384,42 @@ Possible sources:
 - return
 - adjustment
 
-The exact persistence strategy must be decided during architecture design.
+## CustomerLedger
+
+The concrete append-only ledger introduced in Phase 5. A positive `amount` is a
+charge against the customer (credit sale); a negative `amount` reduces the
+outstanding receivable (payment/adjustment). Kept immutable to preserve
+historical financial state (BR-002/BR-012).
 
 ---
 
 # 13. Expense Domain
 
+*Phase 6 — Implemented.*
+
+## ExpenseCategory
+
+A configurable bucket for classifying expenses (rent, utilities, salaries, maintenance, other). May be disabled but never deleted.
+
+- `name` (unique)
+- `active`
+- `createdBy`
+
 ## Expense
 
-Represents a business expense.
+A persisted financial transaction — never a UI-only number.
 
-Potential information:
+- `expenseNumber` (`EXP-YYYYMMDD-NNNN`, sequential)
+- `category` (→ ExpenseCategory)
+- `amount` (> 0)
+- `paymentMethod` (shared POS method set)
+- `expenseDate`
+- `shift` (optional → CashierShift; for cash reconciliation)
+- `notes`
+- `createdBy`
+- `idempotencyKey` (unique, sparse — prevents duplicate submission)
 
-- category
-- amount
-- payment method
-- date
-- notes
-- employee
-- shift where relevant
+When an expense is `CASH` and linked to an OPEN shift, an `EXPENSE` `CashMovement` is recorded in the same transaction so the shift's expected cash accounts for it (BR-063).
 
 ---
 

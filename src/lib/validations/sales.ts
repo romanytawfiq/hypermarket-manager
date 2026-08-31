@@ -24,11 +24,27 @@ const salePaymentInputSchema = z.object({
 
 export const saleCreateSchema = z.object({
   items: z.array(saleItemInputSchema).min(1, "أضف منتجًا واحدًا على الأقل"),
-  payments: z.array(salePaymentInputSchema).min(1, "أضف طريقة دفع واحدة على الأقل"),
+  /**
+   * Payments: may be empty only for a full credit (on-account) sale. The server
+   * enforces full payment for non-credit sales and nets any shortfall into a
+   * receivable for credit sales (BR-011/BR-012).
+   */
+  payments: z.array(salePaymentInputSchema),
   /** Client-generated UUID preventing duplicate submission (idempotency). */
   idempotencyKey: z.string().trim().min(8, "مفتاح غير صالح").max(80, "مفتاح غير صالح"),
   /** Optional customer snapshot (free-form in Phase 4). */
   customerName: z.string().trim().max(200, "اسم العميل طويل جدًا").optional(),
+  /**
+   * Linked customer id (Phase 5). Required for credit / on-account sales.
+   * The server loads the Customer and rejects unknown/deactivated customers.
+   */
+  customerId: z.string().trim().min(1, "اختر العميل").optional(),
+  /**
+   * True = on-account / credit sale. When true and payments fall short of the
+   * total, the remainder becomes a customer receivable (BR-011, BR-012).
+   * Defaults to false, requiring full payment.
+   */
+  onCredit: z.boolean().optional(),
   /** Cash tendered (for change calculation) when a cash payment is present. */
   cashTendered: z.coerce.number().min(0, "المبلغ المدفوع نقدًا يجب ألا يكون سالبًا").optional(),
 });

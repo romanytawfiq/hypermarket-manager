@@ -28,6 +28,7 @@ export default async function PosPage() {
       activeShift={activeShift}
       hasShiftsRead={user.permissions.has("shifts.read")}
       hasReceiptsPrint={user.permissions.has("receipts.print")}
+      canCredit={user.permissions.has("customers.credit")}
     />
   );
 }

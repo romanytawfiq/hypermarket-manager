@@ -52,6 +52,26 @@ export const PERMISSIONS = [
   "supplier_payments.read",
   "supplier_payments.create",
 
+  // Customers & Credit / Receivables (Phase 5)
+  "customers.read",
+  "customers.create",
+  "customers.update",
+  "customers.disable",
+  "customers.view_ledger",
+  "customers.credit",
+
+  "customer_payments.read",
+  "customer_payments.create",
+
+  // Expenses & Accounting (Phase 6)
+  "expense_categories.read",
+  "expense_categories.manage",
+
+  "expenses.read",
+  "expenses.create",
+
+  "accounting.read",
+
   // POS, Payments & Cashier Shifts (Phase 4)
   "sales.read",
   "sales.create",

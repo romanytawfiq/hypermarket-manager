@@ -560,3 +560,60 @@ Reconcile
 ```
 
 The server remains authoritative.
+
+---
+
+# 22. Expense Workflow (Phase 6)
+
+Record an operating expense:
+
+``text
+Authorized User
+?
+Select Expense Category (or create one)
+?
+Enter Amount, Payment Method, Date, Notes
+?
+[Optional] Link to the User's OPEN Shift (for cash reconciliation)
+?
+Server Validates (zod) + Authorization (expenses.create)
+?
+Generate EXP-YYYYMMDD-NNNN (sequence)
+?
+Persist Expense Transaction
+?
+If Cash + OPEN Shift ? record EXPENSE Cash Movement (same transaction)
+?
+Revalidate /expenses, /accounting, /shifts
+``
+
+Rules:
+
+- Amount is entered by the user but validated server-side; references (category, shift) are resolved and authorized on the server (BR-062).
+- Duplicate submission is blocked by the unique idempotency key (BR-009 pattern).
+- A cash expense linked to an OPEN shift decreases that shift's expected cash (BR-063).
+- A closed shift is never mutated.
+
+---
+
+# 23. Accounting Overview Workflow (Phase 6)
+
+``text
+Authorized User (accounting.read)
+?
+Choose Optional Date Range
+?
+Server Aggregates Real Transactions (no second ledger)
+?
+Sales (total/collected/count) + Payment-Method Breakdown
+?
+Purchases (total + cash paid) + Expenses (total + cash) + COGS
+?
+Gross & Net Profit (preliminary)
+?
+Receivables (customer ledger) + Payables (supplier ledger)
+?
+Physical Cash Flow: In vs Out
+``
+
+Period figures honor the chosen range; receivables/payables are current outstanding balances. Cash flow strictly separates physical cash from card/wallet/Instapay (BR-065).

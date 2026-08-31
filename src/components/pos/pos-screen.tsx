@@ -7,12 +7,15 @@ import {
   MinusIcon,
   PlusIcon,
   ScanBarcodeIcon,
+  TrashIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { createSaleAction, posSearchAction } from "@/actions/sales-actions";
+import { posSearchCustomersAction } from "@/actions/customer-actions";
 import {
   getActiveShiftAction,
   openShiftAction,
@@ -20,6 +23,7 @@ import {
   listShiftsAction,
 } from "@/actions/shift-actions";
 import type { SaleDto, PosProductDto } from "@/services/sales.service";
+import type { PosCustomerDto } from "@/services/customer.service";
 import type { ShiftDto } from "@/services/shift.service";
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/sales/constants";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,10 +57,12 @@ export function PosScreen({
   activeShift,
   hasShiftsRead,
   hasReceiptsPrint,
+  canCredit = false,
 }: {
   activeShift: ShiftDto | null;
   hasShiftsRead: boolean;
   hasReceiptsPrint: boolean;
+  canCredit?: boolean;
 }) {
   const [shift, setShift] = useState<ShiftDto | null>(activeShift);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -65,6 +71,12 @@ export function PosScreen({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<PosCustomerDto | null>(null);
+  const [onCredit, setOnCredit] = useState(false);
+  const [custQuery, setCustQuery] = useState("");
+  const [custResults, setCustResults] = useState<PosCustomerDto[]>([]);
+  const [custOpen, setCustOpen] = useState(false);
+  const [custSearching, setCustSearching] = useState(false);
   const [payments, setPayments] = useState<Array<{ method: PaymentMethod; amount: number }>>([]);
   const [cashTendered, setCashTendered] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -79,30 +91,36 @@ export function PosScreen({
   const [closeResult, setCloseResult] = useState<ShiftDto | null>(null);
 
   const searchWrapperRef = useRef<HTMLDivElement>(null);
+  const customerWrapperRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
         setSearchOpen(false);
       }
+      if (customerWrapperRef.current && !customerWrapperRef.current.contains(e.target as Node)) {
+        setCustOpen(false);
+      }
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const runSearch = useCallback(async (q: string) => {
+  const runSearch = useCallback(async (q: string): Promise<PosProductDto[]> => {
     const trimmed = q.trim();
     if (!trimmed) {
       setResults([]);
       setSearchOpen(false);
       setSearching(false);
-      return;
+      return [];
     }
     setSearching(true);
     const res = await posSearchAction(trimmed);
     setResults(res);
     setSearching(false);
     setSearchOpen(true);
+    return res;
   }, []);
 
   const debouncedRun = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,21 +164,35 @@ export function PosScreen({
     setSearchQuery("");
     setResults([]);
     setSearchOpen(false);
+    searchInputRef.current?.focus();
   };
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      if (results.length > 0 && results[0]) {
-        addToCart(results[0]);
-      } else if (searchQuery.trim()) {
-        runSearch(searchQuery);
-      }
+      void handleScanSubmit();
     }
   };
 
-  const changeQuantity = (productId: string, delta: number) => {
-    setCart((prev) =>
+  /**
+   * Barcode/scan fast path: USB scanners type the code then send Enter within
+   * milliseconds — before the 250ms debounce has populated `results`. On Enter
+   * we await a fresh lookup and add the top match immediately so a scan adds
+   * the product without any extra click. Unknown codes surface a clear message.
+   */
+  const handleScanSubmit = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    const res = await runSearch(q);
+    if (res.length > 0 && res[0]) {
+      addToCart(res[0]);
+    } else {
+      setError("المنتج غير موجود");
+      toast.warning("المنتج غير موجود");
+    }
+  };
+
+  const changeQuantity = (productId: string, delta: number) => {    setCart((prev) =>
       prev.map((c) => {
         if (c.productId !== productId) return c;
         const next = c.quantity + delta;
@@ -191,13 +223,18 @@ export function PosScreen({
   const tenderedNum = cashTendered ? Number(cashTendered) : NaN;
   const change = hasCash && !Number.isNaN(tenderedNum) ? tenderedNum - cashPaid : 0;
 
+  const isCreditMode = onCredit && canCredit;
+
+  const paymentValid =
+    isCreditMode
+      ? selectedCustomer !== null && paidTotal <= total + 0.01
+      : payments.length > 0 && paidTotal > 0 && paymentsMatch;
+
   const canSubmit =
     shift !== null &&
     shift.status === "OPEN" &&
     cart.length > 0 &&
-    payments.length > 0 &&
-    paidTotal > 0 &&
-    paymentsMatch &&
+    paymentValid &&
     !submitting;
 
   const setPaymentAmount = (method: PaymentMethod, amount: number) => {
@@ -225,6 +262,34 @@ export function PosScreen({
     return s;
   };
 
+  const runCustomerSearch = useCallback(async (q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setCustResults([]);
+      setCustOpen(false);
+      setCustSearching(false);
+      return;
+    }
+    setCustSearching(true);
+    const res = await posSearchCustomersAction(trimmed);
+    setCustResults(res);
+    setCustSearching(false);
+    setCustOpen(true);
+  }, []);
+
+  const custDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCustSearchChange = (value: string) => {
+    setCustQuery(value);
+    if (custDebounce.current) clearTimeout(custDebounce.current);
+    custDebounce.current = setTimeout(() => {
+      runCustomerSearch(value);
+    }, 250);
+  };
+
+  useEffect(() => () => {
+    if (custDebounce.current) clearTimeout(custDebounce.current);
+  }, []);
+
   const submitSale = async () => {
     setError(null);
     setSubmitting(true);
@@ -238,7 +303,9 @@ export function PosScreen({
         items,
         payments: inPayments,
         idempotencyKey,
-        customerName: customerName || undefined,
+        customerId: selectedCustomer?.id || undefined,
+        onCredit: isCreditMode || undefined,
+        customerName: selectedCustomer ? undefined : customerName || undefined,
         cashTendered: cashTendered ? Number(cashTendered) : undefined,
       });
       if (result.sale) {
@@ -246,9 +313,18 @@ export function PosScreen({
         setCart([]);
         setPayments([]);
         setCustomerName("");
+        setSelectedCustomer(null);
+        setCustQuery("");
+        setCustResults([]);
+        setCustOpen(false);
+        setOnCredit(false);
         setCashTendered("");
         setError(null);
-        toast.success("تمت عملية البيع بنجاح");
+        toast.success(
+          result.sale.paymentState === "PAID"
+            ? "تمت عملية البيع بنجاح"
+            : "تمت عملية البيع على الحساب بنجاح",
+        );
         void refreshShift();
       } else if (result.error) {
         setError(result.error);
@@ -319,6 +395,7 @@ export function PosScreen({
               aria-hidden
             />
             <Input
+              ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               onKeyDown={onSearchKeyDown}
@@ -353,8 +430,25 @@ export function PosScreen({
           </div>
 
           <div className="rounded-lg border bg-background">
-            <div className="border-b px-4 py-3">
+            <div className="flex items-center justify-between border-b px-4 py-3">
               <h2 className="font-heading text-sm font-bold">السلة</h2>
+              {cart.length > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  onClick={() => {
+                    setCart([]);
+                    setPayments([]);
+                    setOnCredit(false);
+                    setSelectedCustomer(null);
+                    searchInputRef.current?.focus();
+                  }}
+                >
+                  <TrashIcon className="size-4" aria-hidden />
+                  مسح السلة
+                </Button>
+              ) : null}
             </div>
             <div className="grid gap-1 p-2">
               {cart.length === 0 ? (
@@ -489,18 +583,104 @@ export function PosScreen({
               </div>
             ) : null}
 
-            <div className="mt-3 grid gap-2">
-              <label className="text-sm">اسم العميل (اختياري)</label>
-              <Input
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="اسم العميل"
-              />
-            </div>
+            {canCredit ? (
+              <div className="mt-3 grid gap-2">
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>بيع على الحساب</span>
+                  <Switch id="pos-credit" checked={onCredit} onCheckedChange={setOnCredit} />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  عند التفعيل قد يكون الدفع أقل من الإجمالي ويُسجَّل المتبقي دَيْنًا على العميل.
+                </p>
+              </div>
+            ) : null}
 
-            {payments.length > 0 ? (
-              <div className="mt-3">
-                {paymentsMatch ? (
+            {isCreditMode ? (
+              <div className="mt-3 grid gap-2">
+                <label className="text-sm">العميل *</label>
+                <div className="relative" ref={customerWrapperRef}>
+                  {selectedCustomer ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border p-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{selectedCustomer.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          رصيده المستحق: {formatEgp(selectedCustomer.balance)}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={() => {
+                          setSelectedCustomer(null);
+                          setCustQuery("");
+                        }}
+                      >
+                        <XIcon className="size-4" aria-hidden />
+                        تغيير
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Input
+                        value={custQuery}
+                        onChange={(e) => onCustSearchChange(e.target.value)}
+                        placeholder="بحث عن العميل بالاسم أو الهاتف"
+                      />
+                      {custOpen && (custSearching || custResults.length > 0) ? (
+                        <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-60 overflow-auto rounded-lg border bg-popover shadow-lg">
+                          {custSearching ? (
+                            <p className="p-3 text-sm text-muted-foreground">جارٍ البحث…</p>
+                          ) : (
+                            custResults.map((c) => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCustomer(c);
+                                  setCustOpen(false);
+                                }}
+                                className={cn(
+                                  "flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-muted",
+                                  !c.allowCredit && "opacity-60",
+                                )}
+                              >
+                                <span className="font-medium">{c.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {c.phone || "—"} · مستحق {formatEgp(c.balance)}
+                                  {!c.allowCredit ? " · لا يُسمح بالحساب" : ""}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-2">
+                <label className="text-sm">اسم العميل (اختياري)</label>
+                <Input
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="اسم العميل"
+                />
+              </div>
+            )}
+
+            <div className="mt-3">
+              {isCreditMode ? (
+                paidTotal > total + 0.01 ? (
+                  <p className="text-sm text-destructive">المبلغ المدفوع يتجاوز إجمالي الفاتورة</p>
+                ) : selectedCustomer && paidTotal < total - 0.01 && total > 0 ? (
+                  <p className="flex items-center gap-1 text-sm font-medium text-amber-700">
+                    سيُسجَّل المتبقي ({formatEgp(total - paidTotal)}) دَيْنًا على {selectedCustomer.name}
+                  </p>
+                ) : null
+              ) : payments.length > 0 ? (
+                paymentsMatch ? (
                   <p className="flex items-center gap-1 text-sm font-medium text-emerald-700">
                     <CheckIcon className="size-4" aria-hidden />
                     الدفع الإجمالي يساوي إجمالي الفاتورة
@@ -509,9 +689,9 @@ export function PosScreen({
                   <p className="text-sm text-destructive">
                     الدفع الإجمالي يجب أن يساوي إجمالي الفاتورة
                   </p>
-                )}
-              </div>
-            ) : null}
+                )
+              ) : null}
+            </div>
 
             {error ? (
               <p className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
@@ -622,7 +802,20 @@ export function PosScreen({
             <DialogDescription>فحص الفاتورة وطباعتها</DialogDescription>
           </DialogHeader>
           {lastSale ? (
-            <Receipt sale={lastSale} canPrint={hasReceiptsPrint} onClose={() => setLastSale(null)} />
+            <div className="grid gap-3">
+              <Receipt sale={lastSale} canPrint={hasReceiptsPrint} onClose={() => setLastSale(null)} />
+              <Button
+                className="w-full"
+                size="lg"
+                type="button"
+                onClick={() => {
+                  setLastSale(null);
+                  searchInputRef.current?.focus();
+                }}
+              >
+                عملية بيع جديدة
+              </Button>
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>

@@ -132,7 +132,19 @@ export function Receipt({
           {sale.change != null && sale.change > 0 ? (
             <Row label="الباقي" value={formatEgp(sale.change)} />
           ) : null}
+          {sale.paymentState !== "PAID" ? (
+            <>
+              <Row label="المدفوع من الحساب" value={formatEgp(sale.totalPaid)} />
+              <Row label="المتبقي (دَيْن)" value={formatEgp(sale.balanceDue)} strong />
+            </>
+          ) : null}
         </div>
+
+        {sale.paymentState === "PAID" ? null : (
+          <p className="mt-1 rounded border border-amber-400/60 bg-amber-50 px-2 py-1 text-center text-[10px] font-medium text-amber-800">
+            فاتورة على الحساب — باقي {formatEgp(sale.balanceDue)} على العميل
+          </p>
+        )}
 
         <Separator />
 

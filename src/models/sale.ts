@@ -19,8 +19,13 @@ import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/sales/constants";
 export const SALE_STATUS = ["COMPLETED"] as const;
 export type SaleStatus = (typeof SALE_STATUS)[number];
 
-/** Current payment completion state. Phase 4 only supports fully-paid sales. */
-export const SALE_PAYMENT_STATE = ["PAID"] as const;
+/**
+ * Payment completion state.
+ *  - PAID    → fully settled at the register (all Phase 4 sales)
+ *  - PARTIAL → some paid, some outstanding (credit sale with partial payment)
+ *  - UNPAID  → full credit, no amount collected at the register
+ */
+export const SALE_PAYMENT_STATE = ["PAID", "PARTIAL", "UNPAID"] as const;
 export type SalePaymentState = (typeof SALE_PAYMENT_STATE)[number];
 
 export interface SaleItem {
@@ -58,11 +63,21 @@ export interface Sale {
   cashier: { id?: string; username?: string };
   /** The cashier shift this sale is associated with. */
   shift: mongoose.Types.ObjectId;
-  /** Optional customer snapshot (Phase 5 expands to the full credit domain). */
+  /**
+   * Linked customer snapshot. When the sale is on a real Customer record,
+   * `id` holds the customer's ObjectId string and `name` its snapshot, so
+   * history stays intact even if the customer is later renamed or deactivated.
+   * Older Phase 4 sales carry only a free-form `name`. The ledger (not this
+   * snapshot) is authoritative for amounts (BR-012).
+   */
   customer?: { id?: string; name?: string };
   items: SaleItem[];
   /** Sum of line totals (server-computed). */
   totalAmount: number;
+  /** Sum of embedded payment amounts (server-computed). */
+  totalPaid: number;
+  /** The remaining receivable for this sale = totalAmount - totalPaid (snapshot; ledger is authoritative). */
+  balanceDue: number;
   /** Payment completion state (PAID for all Phase 4 sales). */
   paymentState: SalePaymentState;
   payments: Payment[];
@@ -121,6 +136,8 @@ const saleSchema = new mongoose.Schema<Sale>(
     },
     items: { type: [saleItemSchema], default: [] },
     totalAmount: { type: Number, required: true, min: 0 },
+    totalPaid: { type: Number, required: true, min: 0, default: 0 },
+    balanceDue: { type: Number, required: true, min: 0, default: 0 },
     paymentState: { type: String, enum: SALE_PAYMENT_STATE, default: "PAID" },
     payments: { type: [paymentSchema], default: [] },
     status: { type: String, enum: SALE_STATUS, default: "COMPLETED" },
