@@ -66,6 +66,18 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "inventory.view_movements",
     "inventory.view_expiry",
     "inventory.view_replenishment",
+    // Suppliers & Purchasing
+    "suppliers.read",
+    "suppliers.create",
+    "suppliers.update",
+    "suppliers.disable",
+    "suppliers.view_ledger",
+    "purchases.read",
+    "purchases.create",
+    "purchases.receive",
+    "purchases.return",
+    "supplier_payments.read",
+    "supplier_payments.create",
   ],
   WAREHOUSE_EMPLOYEE: [
     "products.read",
@@ -82,6 +94,11 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "inventory.view_movements",
     "inventory.view_expiry",
     "inventory.view_replenishment",
+    // Suppliers & Purchasing (receive + record purchases)
+    "suppliers.read",
+    "purchases.read",
+    "purchases.create",
+    "purchases.receive",
   ],
   ACCOUNTANT: [
     "users.read",
@@ -94,6 +111,12 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "inventory.view_movements",
     "inventory.view_expiry",
     "inventory.view_replenishment",
+    // Suppliers & Purchasing
+    "suppliers.read",
+    "suppliers.view_ledger",
+    "purchases.read",
+    "supplier_payments.read",
+    "supplier_payments.create",
   ],
   CASHIER: [],
   BARISTA: [],

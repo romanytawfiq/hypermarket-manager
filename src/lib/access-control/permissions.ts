@@ -37,6 +37,21 @@ export const PERMISSIONS = [
   "inventory.view_expiry",
   "inventory.view_replenishment",
 
+  // Suppliers & Purchasing (Phase 3)
+  "suppliers.read",
+  "suppliers.create",
+  "suppliers.update",
+  "suppliers.disable",
+  "suppliers.view_ledger",
+
+  "purchases.read",
+  "purchases.create",
+  "purchases.receive",
+  "purchases.return",
+
+  "supplier_payments.read",
+  "supplier_payments.create",
+
   "reports.view",
 
   "settings.view",

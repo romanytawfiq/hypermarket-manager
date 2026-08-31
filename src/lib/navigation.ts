@@ -4,7 +4,9 @@ import {
   ListTreeIcon,
   PackageIcon,
   PackageSearchIcon,
+  ShoppingCartIcon,
   TagsIcon,
+  TruckIcon,
   UsersIcon,
   WarehouseIcon,
   type LucideIcon,
@@ -34,6 +36,8 @@ export type NavigationIcon =
   | "movements"
   | "expiry"
   | "replenishment"
+  | "suppliers"
+  | "purchases"
   | "users";
 
 /** Latest set of icons used by navigation; rendered by the client and server. */
@@ -46,6 +50,8 @@ export const iconMap: Record<NavigationIcon, LucideIcon> = {
   movements: PackageSearchIcon,
   expiry: BoxesIcon,
   replenishment: BoxesIcon,
+  suppliers: TruckIcon,
+  purchases: ShoppingCartIcon,
   users: UsersIcon,
 };
 
@@ -68,6 +74,9 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/inventory/movements", label: "حركات المخزون", icon: "movements", permission: "inventory.view_movements" },
   { href: "/inventory/expiry", label: "انتهاء الصلاحية", icon: "expiry", permission: "inventory.view_expiry" },
   { href: "/inventory/replenishment", label: "إعادة التخزين", icon: "replenishment", permission: "inventory.view_replenishment" },
+  // Suppliers & Purchasing
+  { href: "/suppliers", label: "الموردون", icon: "suppliers", permission: "suppliers.read" },
+  { href: "/purchases", label: "المشتريات", icon: "purchases", permission: "purchases.read" },
   // Admin
   { href: "/users", label: "المستخدمون", icon: "users", permission: "users.read" },
 ];

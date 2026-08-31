@@ -149,7 +149,7 @@ async function applyStockChange(
         $inc: { onHand: change.quantity, nonSellable: change.nonSellableDelta ?? 0 },
         $set: { version: spy.version + 1 },
       },
-      { new: true, session, runValidators: false },
+      { returnDocument: "after", session, runValidators: false },
     )
       .select("onHand nonSellable")
       .lean<{ onHand: number; nonSellable: number }>();
@@ -603,6 +603,265 @@ export async function listMovements(
     page: query.page,
     pageSize: query.pageSize,
   };
+}
+
+export interface ReceiveItemInput {
+  productId: string;
+  productName: string;
+  quantity: number;
+  trackExpiry: boolean;
+  /** Batch/expiry info for expiry-tracked products (already validated). */
+  batchCode?: string;
+  expiryDate?: string;
+}
+
+/**
+ * Records received stock for one or more products (purchase receiving).
+ *
+ * All products are processed inside a single transaction so every InventoryState
+ * update, ProductBatch (for expiry-tracked products), and PURCHASE movement
+ * commits or rolls back together (BR-021). Accepted received quantities increase
+ * inventory (BR-025). Optimistic-concurrency versioned updates prevent silent
+ * overwrites under concurrency (BR-020).
+ *
+ * Requires `purchases.receive` (the financial origin is recorded by the
+ * purchasing service separately).
+ */
+export async function receivePurchaseStock(
+  actor: AuthUser | null,
+  receiveItems: ReceiveItemInput[],
+  options: { referenceId?: string; session?: mongoose.ClientSession },
+): Promise<void> {
+  const authed = requirePermission(actor, "purchases.receive");
+  await dbConnect();
+
+  const itemList = [...receiveItems].filter((it) => it.quantity > 0);
+  if (itemList.length === 0) {
+    throw new AppError("VALIDATION", "لا توجد كميات مقبولة للاستلام");
+  }
+
+  const work = async (session: mongoose.ClientSession) => {
+    for (const item of itemList) {
+      const product = await ProductModel.findById(item.productId)
+        .session(session)
+        .select("name trackExpiry")
+        .lean<{ name: string; trackExpiry: boolean }>();
+      if (!product) {
+        throw new AppError("NOT_FOUND", "المنتج غير موجود");
+      }
+
+      const spy = await InventoryStateModel.findOne({ product: item.productId })
+        .session(session)
+        .lean<{ version: number }>();
+      if (!spy) {
+        throw new AppError("NOT_FOUND", "لا توجد حالة مخزون لهذا المنتج");
+      }
+
+      const updated = await InventoryStateModel.findOneAndUpdate(
+        { product: item.productId, version: spy.version },
+        {
+          $inc: { onHand: item.quantity },
+          $set: { version: spy.version + 1 },
+        },
+        { returnDocument: "after", session, runValidators: false },
+      )
+        .select("onHand")
+        .lean<{ onHand: number }>();
+      if (!updated) {
+        throw new AppError(
+          "CONFLICT",
+          "تعذّر تحديث المخزون لأن بياناته تغيّرت. حاول مرة أخرى",
+        );
+      }
+
+      // For expiry-tracked products, record the batch so FEFO/expiry works.
+      if (item.trackExpiry) {
+        const expiry = item.expiryDate ? new Date(item.expiryDate) : undefined;
+        if (expiry && Number.isFinite(expiry.getTime())) {
+          if (expiry.getTime() <= Date.now()) {
+            throw new AppError(
+              "VALIDATION",
+              "تاريخ انتهاء الصلاحية يجب أن يكون في المستقبل",
+            );
+          }
+          await ProductBatchModel.create(
+            [
+              {
+                product: item.productId,
+                batchCode: item.batchCode ?? "",
+                quantity: item.quantity,
+                expiryDate: expiry,
+                sourceReference: { type: "PURCHASE", id: options.referenceId },
+              },
+            ],
+            { session },
+          );
+        }
+      }
+
+      await StockMovementModel.create(
+        [
+          {
+            product: item.productId,
+            type: "PURCHASE" as StockMovementType,
+            quantity: item.quantity,
+            batchCode: item.batchCode ?? "",
+            reason: `استلام مشتريات: ${item.productName} (${item.quantity})`,
+            referenceType: "PURCHASE",
+            referenceId: options.referenceId,
+            actorId: authed.id,
+            actorUsername: authed.username,
+          },
+        ],
+        { session },
+      );
+    }
+
+    await recordAudit({
+      actorId: authed.id,
+      actorUsername: authed.username,
+      action: "inventory.purchase",
+      entity: "purchase",
+      entityId: options.referenceId,
+      after: {
+        referenceId: options.referenceId,
+        items: itemList.map((it) => ({ productId: it.productId, quantity: it.quantity })),
+      },
+    });
+  };
+
+  if (options.session) {
+    await work(options.session);
+  } else {
+    await withTransaction(work);
+  }
+}
+
+/**
+ * Removes returned stock from inventory (supplier return).
+ *
+ * Decrements sellable stock and records a SUPPLIER_RETURN movement per returned
+ * product, all within a single transaction (BR-021). For expiry-tracked
+ * products the return is drawn from the earliest batch first (FEFO, BR-025).
+ * Requires `purchases.return`.
+ */
+export async function removeReturnedStock(
+  actor: AuthUser | null,
+  returnItems: ReceiveItemInput[],
+  options: { referenceId?: string; session?: mongoose.ClientSession },
+): Promise<void> {
+  const authed = requirePermission(actor, "purchases.return");
+  await dbConnect();
+
+  const itemList = [...returnItems].filter((it) => it.quantity > 0);
+  if (itemList.length === 0) {
+    throw new AppError("VALIDATION", "لا توجد كميات للمرتد");
+  }
+
+  const work = async (session: mongoose.ClientSession) => {
+    for (const item of itemList) {
+      const product = await ProductModel.findById(item.productId)
+        .session(session)
+        .select("name trackExpiry")
+        .lean<{ name: string; trackExpiry: boolean }>();
+      if (!product) {
+        throw new AppError("NOT_FOUND", "المنتج غير موجود");
+      }
+
+      const spy = await InventoryStateModel.findOne({ product: item.productId })
+        .session(session)
+        .lean<{ version: number }>();
+      if (!spy) {
+        throw new AppError("NOT_FOUND", "لا توجد حالة مخزون لهذا المنتج");
+      }
+
+      const updated = await InventoryStateModel.findOneAndUpdate(
+        { product: item.productId, version: spy.version },
+        {
+          $inc: { onHand: -item.quantity },
+          $set: { version: spy.version + 1 },
+        },
+        { returnDocument: "after", session, runValidators: false },
+      )
+        .select("onHand")
+        .lean<{ onHand: number }>();
+      if (!updated) {
+        throw new AppError(
+          "CONFLICT",
+          "تعذّر تحديث المخزون لأن بياناته تغيّرت. حاول مرة أخرى",
+        );
+      }
+      if (updated.onHand < 0) {
+        throw new AppError(
+          "CONFLICT",
+          "لا يوجد مخزون كافٍ لهذا المنتج لإتمام عملية المرتد",
+        );
+      }
+
+      // Reduce batches FEFO for expiry-tracked products.
+      if (item.trackExpiry) {
+        let remaining = item.quantity;
+        const batches = await ProductBatchModel.find({
+          product: item.productId,
+          quantity: { $gt: 0 },
+        })
+          .session(session)
+          .sort({ expiryDate: 1 })
+          .select("_id quantity");
+        for (const batch of batches) {
+          if (remaining <= 0) break;
+          const take = Math.min(batch.quantity, remaining);
+          remaining -= take;
+          await ProductBatchModel.updateOne(
+            { _id: batch._id },
+            { $inc: { quantity: -take } },
+            { session },
+          );
+        }
+        if (remaining > 0) {
+          throw new AppError(
+            "CONFLICT",
+            "لا يوجد مخزون كافٍ لهذا المنتج لإتمام عملية المرتد",
+          );
+        }
+      }
+
+      await StockMovementModel.create(
+        [
+          {
+            product: item.productId,
+            type: "SUPPLIER_RETURN" as StockMovementType,
+            quantity: -item.quantity,
+            batchCode: item.batchCode ?? "",
+            reason: `مرتجع مشتريات: ${item.productName} (${item.quantity})`,
+            referenceType: "SUPPLIER_RETURN",
+            referenceId: options.referenceId,
+            actorId: authed.id,
+            actorUsername: authed.username,
+          },
+        ],
+        { session },
+      );
+    }
+
+    await recordAudit({
+      actorId: authed.id,
+      actorUsername: authed.username,
+      action: "inventory.supplier_return",
+      entity: "supplier_return",
+      entityId: options.referenceId,
+      after: {
+        referenceId: options.referenceId,
+        items: itemList.map((it) => ({ productId: it.productId, quantity: it.quantity })),
+      },
+    });
+  };
+
+  if (options.session) {
+    await work(options.session);
+  } else {
+    await withTransaction(work);
+  }
 }
 
 /** Lists a product's batches (with remaining quantity). Requires `inventory.view_expiry`. */
