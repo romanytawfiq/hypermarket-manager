@@ -1,69 +1,25 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function Home() {
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.tsx</code> file.
-          </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="container mx-auto flex min-h-svh max-w-3xl flex-col items-center justify-center gap-6 px-6 py-12">
+      <div className="text-center">
+        <p className="text-sm font-medium text-accent">نكسا ريتيل</p>
+        <h1 className="mt-2 font-heading text-2xl font-bold">منصة إدارة التجزئة والكافيه</h1>
+        <p className="mt-3 text-muted-foreground">
+          المرحلة الحالية: التأسيس والهندسة. تعمل الواجهات التشغيلية بنظام من اليمين إلى اليسار.
+        </p>
+      </div>
+
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="font-heading text-lg">حالة المشروع</CardTitle>
+          <CardDescription>
+            تُبنى منصة نكسا ريتيل على أساس عربي بالكامل (ar-EG) وباتجاه RTL منذ البداية. تُضاف الأقسام
+            الوظيفية تباعًا حسب خارطة الطريق الموثّقة في docs/architecture.md.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </main>
   );
 }

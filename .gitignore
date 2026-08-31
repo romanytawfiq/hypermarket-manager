@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python (ui-ux-pro-max skill scripts)
+__pycache__/
+*.pyc
+
+# logs
+*.log
