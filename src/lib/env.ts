@@ -31,6 +31,9 @@ const envSchema = z.object({
    */
   AUTH_SECRET: z.string().default("development-only-insecure-secret"),
 
+  /** Lifetime of an authentication session in days. */
+  SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
 });
 
@@ -38,6 +41,7 @@ const parsed = envSchema.safeParse({
   NODE_ENV: process.env.NODE_ENV,
   MONGODB_URI: process.env.MONGODB_URI,
   AUTH_SECRET: process.env.AUTH_SECRET,
+  SESSION_TTL_DAYS: process.env.SESSION_TTL_DAYS,
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
 });
 
