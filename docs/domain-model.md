@@ -67,70 +67,111 @@ Example concepts:
 
 # 3. Catalog Domain
 
-## Product
-
-Represents a product that can be sold.
-
-Possible concepts:
-
-- name
-- barcode
-- SKU
-- category
-- brand
-- unit
-- cost
-- price
-- minimum stock
-- online visibility
-- expiry tracking
+*Phase 2 — Implemented.*
 
 ## Category
 
-Groups products.
+Groups products for browsing, filtering, and reporting.
+
+Implemented fields:
+
+- `name` — unique, trimmed, indexed
+- `active` — boolean (default `true`); deactivation preserves the record and keeps historical product references intact
 
 ## Brand
 
-Represents a product brand where applicable.
+Optional product brand. Deactivated rather than deleted to preserve references.
+
+Implemented fields:
+
+- `name` — unique, trimmed, indexed
+- `active` — boolean (default `true`)
+
+## Product
+
+Represents a catalog item that can be sold.
+
+Implemented fields:
+
+- `name` — required, trimmed, indexed
+- `barcode` — optional; sparse-unique index (products without a barcode do not collide)
+- `sku` — optional; sparse-unique index
+- `category` — required reference to Category
+- `brand` — optional reference to Brand
+- `unit` — default `"قطعة"`
+- `purchaseCost` — current catalog purchase cost; min 0 (historical purchases snapshot their own values — BR-006)
+- `sellingPrice` — current catalog selling price; min 0
+- `minimumStock` — integer low-stock threshold (default 0)
+- `trackExpiry` — boolean; enables batch/expiry tracking (default `false`)
+- `onlineVisible` — boolean; whether the product appears in the online store (default `false`)
+- `description` — optional text
+- `active` — boolean (default `true`); deactivated products are hidden from normal selection but historical documents continue referencing them (BR-004)
+
+Compound indexes: `{ active: 1, name: 1 }` for operational listing.
+
+Products are **deactivated, never physically deleted**, so that stock movements, future sales, and other historical documents retain their references (BR-004, BR-022, BR-024).
 
 ---
 
 # 4. Inventory Domain
 
-## Inventory State
+*Phase 2 — Implemented.*
 
-Represents the current availability of a product.
+Inventory is **transaction-driven**: stock is never an isolated editable number. Every change goes through an append-only `StockMovement` record plus an atomic, versioned update of the `InventoryState` cache. Multi-document changes run inside a MongoDB transaction.
 
-The exact persistence strategy must be decided during database design.
+## InventoryState
+
+Denormalized current-state cache for a product's inventory. The authoritative history lives in the append-only `StockMovement` collection.
+
+Implemented fields:
+
+- `product` — unique reference to Product
+- `onHand` — currently sellable quantity (min 0)
+- `nonSellable` — quantity removed from sellable stock, e.g. damaged goods or expired stock awaiting disposal (min 0)
+- `version` — integer optimistic-concurrency counter (default 1)
+
+Concurrency: every mutation uses `findOneAndUpdate({ product, version }, { $inc: { onHand, nonSellable }, $set: { version: version + 1 } })` so concurrent writers cannot silently overwrite each other. If `matchedCount` is 0, the operation is rejected with a conflict error.
+
+Initial state (`onHand: 0`, `nonSellable: 0`, `version: 1`) is created automatically when a product is created.
 
 ## StockMovement
 
-Represents a change in inventory.
+Append-only, authoritative history of all inventory changes. Records are **never mutated or deleted**; corrections are represented by new movements.
 
-Possible types:
+Implemented fields:
 
-- PURCHASE
-- SALE
-- CUSTOMER_RETURN
-- SUPPLIER_RETURN
-- DAMAGE
-- EXPIRY
-- ADJUSTMENT
-- STOCK_COUNT
-- TRANSFER
+- `product` — reference to Product (indexed)
+- `type` — one of: `PURCHASE`, `SALE`, `CUSTOMER_RETURN`, `SUPPLIER_RETURN`, `DAMAGE`, `EXPIRY`, `ADJUSTMENT`, `STOCK_COUNT`, `TRANSFER`
+- `quantity` — signed delta (positive in, negative out)
+- `batch` — optional reference to ProductBatch
+- `batchCode` — optional snapshot label of the batch for readability
+- `reason` — business reason / note
+- `referenceType`, `referenceId` — optional reference to a future origin document (purchase, sale, …)
+- `actorId`, `actorUsername` — snapshot of the acting user
+
+Only `ADJUSTMENT`, `STOCK_COUNT`, `DAMAGE`, and `EXPIRY` can originate in Phase 2. The remaining types (`PURCHASE`, `SALE`, `CUSTOMER_RETURN`, `SUPPLIER_RETURN`, `TRANSFER`) are reserved for later phases.
+
+Indexes: `{ product, createdAt: -1 }` and `{ type, createdAt: -1 }`.
 
 ## ProductBatch
 
-Represents a batch/lot when expiry tracking is required.
+Batch/lot for expiry-tracked products. Only batches whose expiry date is in the future and quantity is positive contribute to sellable inventory (BR-024). FEFO selection orders batches by ascending expiry date (BR-025).
 
-Possible information:
+Implemented fields:
 
-- product
-- batch identifier
-- quantity
-- production date
-- expiry date
-- supplier/purchase reference
+- `product` — reference to Product (indexed)
+- `batchCode` — optional human-readable identifier
+- `quantity` — remaining (un-consumed) quantity (min 0)
+- `expiryDate` — required; batches past this date are not sellable
+- `sourceReference` — optional `{ type, id }` reference to a future receiving document
+
+Compound index: `{ product: 1, expiryDate: 1, quantity: 1 }` for FEFO queries.
+
+### Sellable Stock Computation
+
+- **Non-expiry products:** sellable = `InventoryState.onHand`
+- **Expiry-tracked products:** sellable = sum of non-expired `ProductBatch` quantities (batches with `expiryDate > now` and `quantity > 0`)
+- **Damaged stock** is tracked in `InventoryState.nonSellable` (recordDamage decrements `onHand` and increments `nonSellable`)
 
 ---
 

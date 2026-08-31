@@ -228,7 +228,7 @@ export async function updateUser(
   // Prevent removing ownership from the last active Owner (would leave the
   // application with zero administrative users).
   const currentlyOwner = user.isOwner || currentRoleName === "OWNER";
-  const stillOwnerAfter = nextActive === true && (user.isOwner || nextRoleName === "OWNER");
+  const stillOwnerAfter = nextActive === true && nextRoleName === "OWNER";
   if (currentlyOwner && !stillOwnerAfter) {
     const others = await countOtherActiveOwners(user._id);
     if (others < 1) {
@@ -249,7 +249,10 @@ export async function updateUser(
 
   if (input.name !== undefined) user.name = input.name;
   if (input.newPassword !== undefined) user.passwordHash = await hashPassword(input.newPassword);
-  if (input.roleId && input.roleId !== user.role.toString()) user.role = nextRoleId;
+  if (input.roleId && input.roleId !== user.role.toString()) {
+    user.role = nextRoleId;
+    if (nextRoleName !== "OWNER") user.isOwner = false;
+  }
   if (input.active !== undefined) user.active = nextActive;
 
   await user.save();

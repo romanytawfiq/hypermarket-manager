@@ -222,7 +222,7 @@ The MongoDB persistence design must follow access patterns, consistency requirem
 Use **append-only ledger / account-transaction collections** for customer and supplier financial activity. Each entry records source type, amount, sign, reference, and timestamps. **Balances are the sum of ledger entries**, which preserves historical integrity and prevents silent overwrites. A cached current balance may be kept only as an optimization, with the ledger as the source of truth.
 
 ### Inventory
-Keep an **append-only StockMovement** history plus a denormalized **InventoryState** (on-hand, available, reserved, batched) for fast reads. Both are updated in the same transaction.
+Keep an **append-only StockMovement** history plus a denormalized **InventoryState** (on-hand, nonSellable, version) for fast reads. Both are updated in the same MongoDB transaction. `InventoryState.version` provides optimistic concurrency: every mutation uses `findOneAndUpdate({ product, version }, { $inc, version+1 })` to prevent silent overwrites from concurrent writers.
 
 ### Product batches / expiry
 Products flagged for expiry tracking carry **batches/lots** with quantity, production/expiry dates, and purchase reference. Expired batches are excluded from sellable inventory; FEFO selection is a query over non-expired batches ordered by expiry.
@@ -519,11 +519,11 @@ Confidence in the money-critical and stock-critical paths.
 | Risk | Severity | Mitigation |
 |------|----------|-----------|
 | Inconsistent financial balances | High | Ledger-derived balances; MongoDB transactions; server-computed values; idempotency keys. |
-| Inventory race conditions / oversell | High | Transactions + optimistic state filters; negative-stock guard. |
+| Inventory race conditions / oversell | High | Transactions + optimistic state filters (`InventoryState.version`); negative-stock guard. ✅ Phase 2 |
 | Duplicate operations | High | Idempotency keys + unique indexes + state/version guards. |
-| Poor RTL / Arabic UX | High | RTL-first from the start; logical CSS; MSA labels; `ui-ux-pro-max` review. |
+| Poor RTL / Arabic UX | High | RTL-first from the start; logical CSS; MSA labels; `ui-ux-pro-max` review. ✅ Phase 2 (catalog & inventory UI) |
 | Overly complex POS | Medium–High | Minimal-step discipline; obvious primary actions; usability review. |
-| Weak permissions | High | Permission-based checks at every server boundary; test matrix. |
+| Weak permissions | High | Permission-based checks at every server boundary; test matrix. ✅ Phase 1 & 2 |
 | Reporting performance | Medium | Date-indexed aggregation; server-side filtering/paging; rebuildable summaries. |
 | Realtime reliability | Medium | Transactional outbox + authoritative server state + reconnect reconcile + idempotent transitions. |
 | Printing limitations | Medium–High | Phased browser/ESC/POS; validate Arabic rendering on real printers. |
@@ -577,7 +577,7 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 |-------|------|-----------|-------------|
 | **0 — Foundation** | Arabic-first base, tooling, design system | — | Tailwind + shadcn init; RTL root layout + Arabic font; design tokens; env/DB connection; test runner; i18n scaffolding. |
 | **1 — Identity & RBAC** | Auth + roles + permissions | 0 | User/Role/Permission models; session auth; permission service; login; dashboard shell with role nav; audit foundation. |
-| **2 — Catalog & Inventory Core** | Products + transaction-driven stock + expiry | 0, 1 | Product/Category/Brand; InventoryState + StockMovement + Batch; low/out/expiring logic; replenishment; movement UI. |
+| **2 — Catalog & Inventory Core** | Products + transaction-driven stock + expiry | 0, 1 | Product/Category/Brand; InventoryState + StockMovement + Batch; low/out/expiring logic; replenishment; movement UI. ✅ **Implemented** |
 | **3 — Suppliers & Purchasing** | Receive stock, track payable | 0–2 | Supplier; Purchase/PurchaseItem; receiving; supplier ledger + payable; payments; supplier returns. |
 | **4 — POS, Payments & Cashier Shifts** | The core money path | 0–3 | POS screen; mixed payments; credit sales; returns/refunds; shift open/close; cash movements; variance; basic receipt. |
 | **5 — Customer Credit & Receivables** | Customer accounts, credit, collections | 0–4 | Customer; customer ledger; credit limits/approval; payment UI; balance reporting. |

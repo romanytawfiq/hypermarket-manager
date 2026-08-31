@@ -1,14 +1,20 @@
 /**
  * Vitest global setup.
  *
- * Starts an in-memory MongoDB (mongodb-memory-server) and points MONGODB_URI at
- * it BEFORE any test file imports `@/lib/env` (which caches the URI at module
- * load). This keeps service/integration tests fully isolated from a live
- * MongoDB instance.
+ * Starts an in-memory MongoDB replica set (single node) and points MONGODB_URI
+ * at it BEFORE any test file imports `@/lib/env` (which caches the URI at module
+ * load). A replica set is required because inventory operations run inside
+ * multi-document transactions (`withTransaction`).
+ *
+ * This keeps service/integration tests fully isolated from a live MongoDB.
  */
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-const mongod = await MongoMemoryServer.create();
+const mongod = await MongoMemoryReplSet.create({
+  replSet: { count: 1 },
+});
+
+await mongod.waitUntilRunning();
 
 process.env.MONGODB_URI = mongod.getUri("nexa-retail-test");
 

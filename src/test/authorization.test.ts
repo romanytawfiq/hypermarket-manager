@@ -17,7 +17,7 @@ describe("authorization / RBAC enforcement", () => {
     const owner = await createUser({ username: "owner", role: "OWNER", isOwner: true });
     const actor = await buildAuthUser(owner);
     for (const permission of PERMISSIONS) {
-      expect(hasPermission(actor, permission)).toBe(true);
+      expect(hasPermission(actor, permission, actor.permissions)).toBe(true);
     }
   });
 
@@ -25,7 +25,7 @@ describe("authorization / RBAC enforcement", () => {
     const cashier = await createUser({ username: "cashier", role: "CASHIER" });
     const actor = await buildAuthUser(cashier);
     for (const permission of PERMISSIONS) {
-      expect(hasPermission(actor, permission)).toBe(false);
+      expect(hasPermission(actor, permission, actor.permissions)).toBe(false);
     }
   });
 

@@ -18,6 +18,25 @@ export const PERMISSIONS = [
   "roles.read",
   "roles.manage",
 
+  // Catalog & Inventory (Phase 2)
+  "products.read",
+  "products.create",
+  "products.update",
+  "products.disable",
+
+  "categories.read",
+  "categories.manage",
+
+  "brands.read",
+  "brands.manage",
+
+  "inventory.read",
+  "inventory.adjust",
+  "inventory.count",
+  "inventory.view_movements",
+  "inventory.view_expiry",
+  "inventory.view_replenishment",
+
   "reports.view",
 
   "settings.view",

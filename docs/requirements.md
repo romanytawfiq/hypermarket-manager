@@ -66,11 +66,11 @@ Protected internal application areas must require authentication.
 
 ## REQ-AUTH-005
 
-Sensitive business operations must require server-side authorization.
+Sensitive business operations must require server-side authorization. ✅ (Phase 1 & 2: server-side `requirePermission` enforced at service boundary.)
 
 ## REQ-AUTH-006
 
-The UI must not be considered a security boundary.
+The UI must not be considered a security boundary. ✅
 
 ---
 
@@ -100,142 +100,148 @@ The system must prevent unauthorized users from performing restricted actions.
 
 # 5. Product Management
 
+*Phase 2 — Implemented.*
+
 ## REQ-PROD-001
 
-Authorized users can create products.
+Authorized users can create products. ✅
 
 ## REQ-PROD-002
 
-Authorized users can edit products.
+Authorized users can edit products. ✅
 
 ## REQ-PROD-003
 
-Authorized users can deactivate products.
+Authorized users can deactivate products (deactivation, not deletion, preserves historical references). ✅
 
 ## REQ-PROD-004
 
-Products should support:
+Products support:
 
-- name
-- barcode
-- SKU
-- category
-- brand
-- unit
-- purchase price
-- selling price
-- minimum stock threshold
-- online visibility
-- product description
-- product images
-- expiry tracking configuration
+- name ✅
+- barcode (sparse-unique) ✅
+- SKU (sparse-unique) ✅
+- category (required reference) ✅
+- brand (optional reference) ✅
+- unit (default "قطعة") ✅
+- purchase cost ✅
+- selling price ✅
+- minimum stock threshold ✅
+- online visibility ✅
+- product description ✅
+- product images — pending Phase 9 (Online Store)
+- expiry tracking configuration ✅
 
 ## REQ-PROD-005
 
-Products must support search by barcode and human-readable fields.
+Products support search by barcode, name, and SKU via regex query. ✅
 
 ## REQ-PROD-006
 
-The system should distinguish active and inactive products.
+The system distinguishes active and inactive products. ✅
 
 ---
 
 # 6. Categories and Brands
 
+*Phase 2 — Implemented.*
+
 ## REQ-CAT-001
 
-Authorized users can create categories.
+Authorized users can create categories. ✅
 
 ## REQ-CAT-002
 
-Authorized users can update categories.
+Authorized users can update categories. ✅
 
 ## REQ-CAT-003
 
-Authorized users can deactivate categories where required.
+Authorized users can deactivate categories where required (deactivation preserves historical references). ✅
 
 ## REQ-BRAND-001
 
-Authorized users can create and manage brands when applicable.
+Authorized users can create and manage brands. ✅
 
 ---
 
 # 7. Inventory Management
 
+*Phase 2 — Implemented.*
+
 ## REQ-INV-001
 
-The system must track current inventory.
+The system tracks current inventory via `InventoryState` (denormalized cache) plus append-only `StockMovement` history. ✅
 
 ## REQ-INV-002
 
-Inventory changes must be traceable.
+Inventory changes are traceable through the `StockMovement` ledger. ✅
 
 ## REQ-INV-003
 
-Inventory changes must be represented by stock movements.
+Inventory changes are represented by stock movements (append-only, never mutated). ✅
 
 ## REQ-INV-004
 
-The system must support inventory changes caused by:
+The system supports inventory changes caused by:
 
-- purchasing
-- sales
-- customer returns
-- supplier returns
-- damage
-- expiry
-- manual adjustment
-- stock count
-- future transfers
+- purchasing (reserved for Phase 3+)
+- sales (reserved for Phase 4+)
+- customer returns (reserved for later)
+- supplier returns (reserved for later)
+- damage ✅
+- expiry ✅
+- manual adjustment ✅
+- stock count ✅
+- future transfers (reserved for later)
 
 ## REQ-INV-005
 
-The system must identify low-stock products.
+The system identifies low-stock products (`sellable <= minimumStock`). ✅
 
 ## REQ-INV-006
 
-The system must identify out-of-stock products.
+The system identifies out-of-stock products (`sellable <= 0`). ✅
 
 ## REQ-INV-007
 
-The system should identify products approaching expiry.
+The system identifies products approaching expiry (within 30 days) and already-expired batches. ✅
 
 ## REQ-INV-008
 
-Products that require expiry tracking should support batch or lot information.
+Products with `trackExpiry = true` support batch/lot tracking via `ProductBatch`. ✅
 
 ## REQ-INV-009
 
-Authorized users should be able to review stock movements.
+Authorized users can review stock movements (paginated, filterable by product and type). ✅
 
 ## REQ-INV-010
 
-Inventory adjustments must be auditable.
+Inventory adjustments are auditable (audit records with actor, timestamp, and change details). ✅
 
 ---
 
 # 8. Inventory Replenishment
 
+*Phase 2 — Implemented.*
+
 ## REQ-REPLENISH-001
 
-The system should suggest products that need replenishment.
+The system suggests products that need replenishment (`sellable < minimumStock`). ✅
 
 ## REQ-REPLENISH-002
 
-Suggestions may consider:
+Suggestions consider:
 
-- current stock
-- minimum stock
-- recent sales
-- sales velocity
-- supplier availability
-- product expiry
+- current stock (sellable quantity) ✅
+- minimum stock ✅
+- recent sales — pending Phase 4+ (sales data)
+- sales velocity — pending Phase 10 (reports)
+- supplier availability — pending Phase 3+ (suppliers)
+- product expiry — ✅ (expiry-visible in inventory summary)
 
 ## REQ-REPLENISH-003
 
-Replenishment suggestions must be recommendations.
-
-Employees must be able to review them before creating a purchase.
+Replenishment suggestions are recommendations. Employees review them before creating a purchase. ✅
 
 ---
 
@@ -760,7 +766,7 @@ Arabic is the default application language.
 
 ## REQ-AR-002
 
-The internal application must be RTL.
+The internal application must be RTL. ✅ (Phase 2: inventory, catalog, and movement UI pages are Arabic-first RTL.)
 
 ## REQ-AR-003
 
@@ -856,4 +862,4 @@ Critical calculations must be validated server-side.
 
 ## REQ-DATA-005
 
-Concurrent operations must not corrupt financial or inventory state.
+Concurrent operations must not corrupt financial or inventory state. ✅ (Phase 2: optimistic concurrency via `InventoryState.version` with `findOneAndUpdate` version filter.)

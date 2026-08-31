@@ -1,6 +1,12 @@
 import {
+  BoxesIcon,
   LayoutDashboardIcon,
+  ListTreeIcon,
+  PackageIcon,
+  PackageSearchIcon,
+  TagsIcon,
   UsersIcon,
+  WarehouseIcon,
   type LucideIcon,
 } from "lucide-react";
 import type { AuthUser } from "@/services/auth.service";
@@ -24,6 +30,16 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "الرئيسية", icon: LayoutDashboardIcon },
+  // Catalog
+  { href: "/products", label: "المنتجات", icon: PackageIcon, permission: "products.read" },
+  { href: "/categories", label: "الفئات", icon: ListTreeIcon, permission: "categories.read" },
+  { href: "/brands", label: "العلامات التجارية", icon: TagsIcon, permission: "brands.read" },
+  // Inventory
+  { href: "/inventory", label: "المخزون", icon: WarehouseIcon, permission: "inventory.read" },
+  { href: "/inventory/movements", label: "حركات المخزون", icon: PackageSearchIcon, permission: "inventory.view_movements" },
+  { href: "/inventory/expiry", label: "انتهاء الصلاحية", icon: BoxesIcon, permission: "inventory.view_expiry" },
+  { href: "/inventory/replenishment", label: "إعادة التخزين", icon: BoxesIcon, permission: "inventory.view_replenishment" },
+  // Admin
   { href: "/users", label: "المستخدمون", icon: UsersIcon, permission: "users.read" },
 ];
 

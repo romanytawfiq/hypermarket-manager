@@ -6,8 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Planning / Architecture**
-> This project is currently in the **planning and architecture phase**. The application baseline is a fresh Next.js scaffold. Most features described in this README and the `docs/` folder are **planned**, not yet implemented. See [Development Status](#development-status).
+> **Status: Phase 2 Complete**
+> Phases 0, 1, and 2 are implemented. See [Development Status](#development-status).
 
 ---
 
@@ -151,8 +151,6 @@ The approved technology stack is defined in `AGENTS.md`:
 - **Notifications:** sonner
 - **Architecture:** Server Components by default; Client Components only where interactivity is required; Server Actions for mutations.
 
-> **Note:** The full stack is **not yet installed**. The project baseline currently includes only `next`, `react`, and `react-dom`. The remaining dependencies are added during the implementation phase described in `docs/architecture.md`.
-
 ---
 
 ## Architecture Overview
@@ -235,15 +233,38 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-The project is currently in the **Planning / Architecture** phase.
+Phases 0, 1, and 2 are implemented and the test suite passes (7 files, 53 tests).
 
-- The application baseline is a fresh [Next.js](https://nextjs.org) scaffold (App Router, TypeScript).
-- The architecture has been analyzed and documented in [docs/architecture.md](docs/architecture.md).
-- **No application features are implemented yet** — there is no POS, no inventory, no accounting, no café system, no online store, and no database models.
-- The approved dependency stack is defined but **not yet installed**.
-- A phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
+| Phase | Status |
+|-------|--------|
+| **0 — Foundation** | ✅ Complete |
+| **1 — Identity & RBAC** | ✅ Complete |
+| **2 — Catalog & Inventory Core** | ✅ Complete |
+| **3 — Suppliers & Purchasing** | Planned |
+| **4 — POS, Payments & Cashier Shifts** | Planned |
+| **5 — Customer Credit & Receivables** | Planned |
+| **6 — Expenses & Accounting** | Planned |
+| **7 — Café / KDS** | Planned |
+| **8 — Printing** | Planned |
+| **9 — Online Store & Delivery** | Planned |
+| **10 — Reports & Audit** | Planned |
+| **11 — Production Hardening** | Planned |
 
-Features described in this README and in `docs/` are **planned**, not implemented. Do not assume a feature exists until it is explicitly delivered.
+### Phase 2 — Catalog & Inventory Core (Implemented)
+
+Phase 2 delivers the product catalog and transaction-driven inventory engine:
+
+- **Catalog:** Product, Category, and Brand CRUD with deactivation (not deletion) to preserve historical references. Products have sparse-unique barcode/SKU, required category, optional brand, configurable pricing, minimum stock threshold, expiry tracking flag, and online visibility flag.
+- **Inventory strategy:** Transaction-driven — stock is never an isolated editable number. Every change creates an append-only `StockMovement` record plus an atomic, versioned `InventoryState` update with optimistic concurrency (`version` field). Multi-document changes run in a MongoDB transaction.
+- **Sellable stock:** Non-expiry products → `InventoryState.onHand`. Expiry-tracked products → sum of non-expired `ProductBatch` quantities.
+- **Inventory operations:** Manual adjustment (signed delta), physical stock count (reconciliation), damage recording (`onHand` → `nonSellable`), expiry disposal (only expired batches), low-stock / out-of-stock / replenishment queries, expiry batch monitoring, paginated movement history, product batch listing.
+- **Stock rules:** `EXPIRING_SOON_DAYS = 30`; low-stock = `sellable <= minimumStock`; out-of-stock = `sellable <= 0`; replenishment = `max(0, minimumStock - sellable)`.
+- **Permissions:** Granular Phase 2 permissions (`products.*`, `categories.*`, `brands.*`, `inventory.*`) with role defaults: MANAGER and WAREHOUSE_EMPLOYEE have full access; ACCOUNTANT has read-only access; CASHIER and BARISTA have none. Authorization enforced server-side.
+- **Validation:** Shared Zod schemas (`src/lib/validations/catalog.ts`, `src/lib/validations/inventory.ts`) with server-side re-validation.
+- **UI:** Arabic-first RTL pages for products, categories, brands, inventory overview, movements, expiry, and replenishment under `src/app/(dashboard)/` with components in `src/components/catalog/` and `src/components/inventory/`.
+- **Tests:** `catalog.test.ts` and `inventory.test.ts`; full suite (7 files, 53 tests) passes.
+
+The phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
 
 ---
 
@@ -261,4 +282,4 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-> The application is Arabic-first and RTL. The baseline scaffold configures this during the foundation implementation phase.
+> The application is Arabic-first and RTL. Phases 0–2 are implemented; the foundation, identity/RBAC, and catalog/inventory features are functional.

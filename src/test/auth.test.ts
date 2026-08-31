@@ -88,6 +88,7 @@ describe("authentication", () => {
   });
 
   it("treats an expired session as invalid and removes it", async () => {
+    await SessionModel.deleteMany({});
     const { token } = await authenticate(owner.username, TEST_PASSWORD);
     await SessionModel.updateMany(
       {},
