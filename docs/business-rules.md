@@ -599,11 +599,33 @@ Gross profit = sales revenue − COGS (from sale-item cost snapshots). Net profi
 
 ---
 
-# 20c. Cafe Orders & Barista KDS (Phase 7)
+# 20c. Cafe Orders & Barista KDS (Phase 7 + 7.1)
 
-## BR-067 - Cafe Order Is Operational in Phase 7
+## BR-067 - Cafe Order Checkout Is Financial (Phase 7.1)
 
-A cafe order is an **operational** workflow object, not a financial transaction, in Phase 7. It records the order lines, status, and cashier/barista progression but records **no payment and no Sale**, and performs **no inventory or recipe deduction**. This is a documented limitation: payment/checkout and cafe ingredient inventory integration are deferred (known limitations). No second payment system was introduced.
+A cafe order is recorded at checkout together with its **Sale** in one MongoDB transaction (BR-072-style atomicity). Order creation therefore:
+
+- requires `cafe.orders.create` **and** `sales.create` (a cashier, manager, or owner); BARISTA keeps no sales/accounting permissions and can never create an order.
+- requires an active cashier shift (same rule as POS, BR-001) and sellable stock for every line.
+- enforces full payment: the sum of payments must equal the invoice total (BR-008). Partial/credit payment is a POS-only path; cafe orders settle at checkout.
+- derives every price and total from the catalog product server-side and snapshots them (BR-070), reusing the existing Sale core so `CafeOrder.totalAmount === Sale.total` always.
+- stores a stable link `saleId` + the Sale `invoiceNumber` (INV-…) on the order. The Sale is authoritative; the order number (CF-…) and invoice number (INV-…) stay distinct.
+- only CASH payments contribute to the shift's expected cash; card/mobile methods do not (BR-001).
+
+Any failure — payment mismatch, unknown/inactive product, insufficient stock, conflicting state — rolls back the whole transaction: no order, no Sale, no stock movement, no shift effect.
+
+**Cancellation remains operational:** advancing the state (e.g. CANCELLED) never mutates the linked Sale. Sales returns/refunds are not modeled yet (Known Limitations), matching the POS/returns position.
+
+## BR-067b - Per-Cup Sugar Levels (Phase 7.1)
+
+Sugar belongs to the individual cup, not to the product line. Canonical levels (English identifiers stored, Arabic labels presentation-only): `PLAIN` (سادة), `LIGHT` (ريحة), `MEDIUM` (مزبوط), `STANDARD` (مانو, default), `EXTRA` (زيادة), `EXTRA_EXTRA` (فوق الزيادة), `CARAMEL` (كراميل).
+
+Rules:
+
+- A product advertises `supportsSugarOptions`; selecting a sugar for a product that does not support it is rejected server-side (VALIDATION) and nothing is recorded.
+- Two cups of the same product with **different** sugar (or customization) are always **separate order lines** and are never merged. Identical (product + sugar + customization) lines are merged into a single line with summed quantity.
+- In the order builder, changing the sugar of a line with quantity > 1 splits exactly one cup off with the new sugar; the rest keep their previous sugar (client-side helper + integration round-trip are both unit-tested).
+- The sugar value is snapshotted per line on the order; legacy orders without a recorded sugar remain valid (optional field, no fabricated value).
 
 ## BR-068 - Server-Authoritative State Machine
 
@@ -649,8 +671,8 @@ The following rules must be explicitly decided before implementation of the rele
 | VAT                   | Required / Not required                   | Financial calculations           | Pending |
 | Shift expense         | Allowed / Separate workflow               | Cash reconciliation              | **Resolved (Phase 6):** Expenses are first-class financial transactions. A cash expense linked to an OPEN shift produces an EXPENSE cash movement so the shift's expected cash accounts for it; a closed shift is never mutated. |
 | Multiple open shifts  | Allowed / Not allowed                     | Shift constraints                | Pending |
-| Café ingredients      | Track / Do not track                      | Inventory model                  | **Pending (deferred):** Phase 7 is operational only; no recipe/ingredient inventory deduction is performed. Open decision for a later phase. |
-| Café order payment    | At checkout / On completion / Deferred    | Payment + Sale integration       | **Pending (deferred):** Phase 7 records no Payment / Sale for a café order. No second payment system added. |
+| Café ingredients      | Track / Do not track                      | Inventory model                  | **Pending (deferred):** recipe/ingredient deduction is not modeled; a cafe sale deducts the sold catalog product(s) like any POS sale. Open decision for a later phase. |
+| Café order payment    | At checkout / On completion / Deferred    | Payment + Sale integration       | **Resolved (Phase 7.1):** payment is collected **at checkout**; the café order and its Sale/payments/stock/shift effect commit in one transaction. Full payment required (no on-account). BARISTA cannot create orders. |
 | Online payment        | Supported / Not supported                 | Order state                      | Pending |
 | Cash on delivery      | Supported / Not supported                 | Delivery + payment               | Pending |
 | Delivery fee          | Fixed / Distance / Area / Manual          | Order pricing                    | Pending |

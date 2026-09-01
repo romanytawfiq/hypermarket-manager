@@ -10,6 +10,7 @@ import {
   Trash2Icon,
   SearchIcon,
   HistoryIcon,
+  CheckIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,14 +37,15 @@ import {
   formatShortTime,
 } from "@/lib/cafe/format";
 import type { CafeOrderDto, CafeProductSearchDto, CafeCustomerSearchDto } from "@/services/cafe.service";
+import {
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
+  type PaymentMethod,
+} from "@/lib/sales/constants";
+import { CAFE_SUGAR_LEVELS, CAFE_SUGAR_LABELS, type CafeSugarLevel } from "@/lib/cafe/sugar";
+import { type CafeCartLine, upsertLine, selectSugar, defaultSugarFor } from "@/lib/cafe/cart";
 
-interface LineItem {
-  productId: string;
-  name: string;
-  unitPrice: number;
-  quantity: number;
-  notes: string;
-}
+const SUGAR_CHOICES: CafeSugarLevel[] = [...CAFE_SUGAR_LEVELS];
 
 export function CafeScreen({
   initialActive,
@@ -64,6 +66,7 @@ export function CafeScreen({
   const [history, setHistory] = useState(initialHistory);
   const [showHistory, setShowHistory] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   // Track the callbacks we hand to the realtime hook so it always sees fresh ones.
   const handlersRef = useRef({ onEvent: undefined as undefined | (() => void), onReconnect: undefined as undefined | (() => void) });
@@ -98,9 +101,13 @@ export function CafeScreen({
     });
   };
 
-  const onCreated = () => {
+  const onCreated = (order: CafeOrderDto) => {
     setBuilderOpen(false);
-    toast.success("تم إنشاء طلب الكافيه");
+    toast.success(
+      order.invoiceNumber
+        ? `تم إنشاء الطلب ${order.orderNumber} — الفاتورة ${order.invoiceNumber}`
+        : "تم إنشاء طلب الكافيه",
+    );
     refresh(hasKds ? "kds" : "active");
   };
 
@@ -140,11 +147,14 @@ export function CafeScreen({
         <ActiveOrders
           orders={active}
           pending={pending}
+          pendingOrderId={pendingOrderId}
           canTransition={canTransition}
           canCancel={canCancel}
           onTransition={(id, status) => {
+            setPendingOrderId(id);
             startTransition(async () => {
               const res = await transitionCafeOrderAction({ orderId: id, targetStatus: status });
+              setPendingOrderId(null);
               if (res.order) {
                 toast.success(`تم تغيير الحالة إلى ${CAFE_STATUS_LABELS[res.order.status]}`);
               } else if (res.error) {
@@ -157,7 +167,7 @@ export function CafeScreen({
       )}
 
       {builderOpen ? (
-        <OrderBuilder onSuccess={onCreated} />
+        <OrderBuilder onSuccess={onCreated} onClose={() => setBuilderOpen(false)} />
       ) : null}
     </div>
   );
@@ -180,12 +190,14 @@ function ConnectionBadge({ status }: { status: string }) {
 function ActiveOrders({
   orders,
   pending,
+  pendingOrderId,
   canTransition,
   canCancel,
   onTransition,
 }: {
   orders: CafeOrderDto[];
   pending: boolean;
+  pendingOrderId: string | null;
   canTransition: boolean;
   canCancel: boolean;
   onTransition: (id: string, status: "PREPARING" | "READY" | "COMPLETED" | "CANCELLED") => void;
@@ -223,6 +235,11 @@ function ActiveOrders({
             </Badge>
           </div>
           {o.customerName ? <p className="mt-1 text-sm font-medium">👤 {o.customerName}</p> : null}
+          {o.invoiceNumber ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              فاتورة <span className="font-mono" dir="ltr">{o.invoiceNumber}</span>
+            </p>
+          ) : null}
           <ul className="mt-3 divide-y">
             {o.items.map((it, i) => (
               <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
@@ -245,7 +262,7 @@ function ActiveOrders({
             <div className="flex flex-wrap gap-1.5">
               <TransitionButtons
                 status={o.status}
-                pending={pending}
+                busy={pendingOrderId === o.id}
                 canTransition={canTransition}
                 canCancel={canCancel}
                 onTransition={(s) => onTransition(o.id, s)}
@@ -260,13 +277,13 @@ function ActiveOrders({
 
 function TransitionButtons({
   status,
-  pending,
+  busy,
   canTransition,
   canCancel,
   onTransition,
 }: {
   status: CafeOrderDto["status"];
-  pending: boolean;
+  busy: boolean;
   canTransition: boolean;
   canCancel: boolean;
   onTransition: (s: "PREPARING" | "READY" | "COMPLETED" | "CANCELLED") => void;
@@ -275,22 +292,22 @@ function TransitionButtons({
   return (
     <>
       {status === "NEW" && canTransition ? (
-        <Button size="sm" disabled={pending} onClick={() => onTransition("PREPARING")}>
+        <Button size="sm" disabled={busy} onClick={() => onTransition("PREPARING")}>
           بدء التحضير
         </Button>
       ) : null}
       {status === "PREPARING" && canTransition ? (
-        <Button size="sm" disabled={pending} onClick={() => onTransition("READY")}>
+        <Button size="sm" disabled={busy} onClick={() => onTransition("READY")}>
           جاهز
         </Button>
       ) : null}
       {status === "READY" && canTransition ? (
-        <Button size="sm" disabled={pending} onClick={() => onTransition("COMPLETED")}>
+        <Button size="sm" disabled={busy} onClick={() => onTransition("COMPLETED")}>
           تم التسليم
         </Button>
       ) : null}
       {showCancel ? (
-        <Button variant="ghost" size="sm" disabled={pending} onClick={() => onTransition("CANCELLED")}>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onTransition("CANCELLED")}>
           إلغاء
         </Button>
       ) : null}
@@ -307,6 +324,7 @@ function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () =
             <th className="px-3 py-2 text-start font-medium">رقم الطلب</th>
             <th className="px-3 py-2 text-start font-medium">الوقت</th>
             <th className="px-3 py-2 text-start font-medium">الأصناف</th>
+            <th className="px-3 py-2 text-start font-medium">الفاتورة</th>
             <th className="px-3 py-2 text-start font-medium">الإجمالي</th>
             <th className="px-3 py-2 text-start font-medium">الحالة</th>
           </tr>
@@ -314,7 +332,7 @@ function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () =
         <tbody>
           {orders.length === 0 ? (
             <tr>
-              <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">لا يوجد سجل بعد.</td>
+              <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">لا يوجد سجل بعد.</td>
             </tr>
           ) : (
             orders.map((o) => (
@@ -322,6 +340,9 @@ function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () =
                 <td className="px-3 py-2 font-mono text-xs" dir="ltr">{o.orderNumber}</td>
                 <td className="px-3 py-2 text-muted-foreground">{formatShortTime(o.createdAt)}</td>
                 <td className="px-3 py-2">{o.items.map((i) => i.productName).join("، ")}</td>
+                <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">
+                  {o.invoiceNumber || "—"}
+                </td>
                 <td className="px-3 py-2 font-semibold tabular-nums">{formatEgp(o.totalAmount)}</td>
                 <td className="px-3 py-2">
                   <Badge variant="outline" className={CAFE_STATUS_TONES[o.status]}>{CAFE_STATUS_LABELS[o.status]}</Badge>
@@ -340,8 +361,14 @@ function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () =
   );
 }
 
-function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
-  const [lines, setLines] = useState<LineItem[]>([]);
+function OrderBuilder({
+  onSuccess,
+  onClose,
+}: {
+  onSuccess: (order: CafeOrderDto) => void;
+  onClose: () => void;
+}) {
+  const [lines, setLines] = useState<CafeCartLine[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CafeProductSearchDto[]>([]);
   const [customerQuery, setCustomerQuery] = useState("");
@@ -350,9 +377,18 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
   const [note, setNote] = useState("");
   const [actionError, setActionError] = useState<string>();
   const [searching, setSearching] = useState(false);
+  const [payments, setPayments] = useState<Array<{ method: PaymentMethod; amount: number }>>([]);
+  const [cashTendered, setCashTendered] = useState("");
   const [pending, startTransition] = useTransition();
 
   const total = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
+  const cashPaid = payments.filter((p) => p.method === "CASH").reduce((s, p) => s + p.amount, 0);
+  const paidTotal = payments.reduce((s, p) => s + p.amount, 0);
+  const paymentsMatch = Math.abs(paidTotal - total) <= 0.01;
+  const hasCash = payments.some((p) => p.method === "CASH");
+  const tenderedNum = cashTendered ? Number(cashTendered) : NaN;
+  const change = hasCash && !Number.isNaN(tenderedNum) ? tenderedNum - cashPaid : 0;
+  const paymentValid = payments.length > 0 && paidTotal > 0 && paymentsMatch;
 
   const runSearch = (q: string) => {
     setQuery(q);
@@ -381,33 +417,62 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
   };
 
   const addProduct = (p: CafeProductSearchDto) => {
-    setLines((prev) => {
-      const existing = prev.find((l) => l.productId === p.id);
-      if (existing) {
-        return prev.map((l) =>
-          l.productId === p.id ? { ...l, quantity: l.quantity + 1 } : l,
-        );
-      }
-      return [...prev, { productId: p.id, name: p.name, unitPrice: p.sellingPrice, quantity: 1, notes: "" }];
-    });
+    setLines((prev) =>
+      upsertLine(
+        prev,
+        {
+          id: p.id,
+          name: p.name,
+          unitPrice: p.sellingPrice,
+          supportsSugarOptions: p.supportsSugarOptions,
+        },
+        defaultSugarFor(p),
+      ),
+    );
     setResults([]);
     setQuery("");
   };
 
+  const setSugar = (id: string, level: CafeSugarLevel) => {
+    setLines((prev) => selectSugar(prev, id, level));
+  };
+
   const setQty = (id: string, delta: number) => {
     setLines((prev) =>
-      prev.map((l) =>
-        l.productId === id ? { ...l, quantity: Math.max(1, l.quantity + delta) } : l,
-      ),
+      prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(1, l.quantity + delta) } : l)),
     );
   };
 
-  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.productId !== id));
+  const setNotes = (id: string, value: string) =>
+    setLines((prev) => prev.map((l) => (l.id === id ? { ...l, notes: value } : l)));
+
+  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
+
+  const setPaymentAmount = (method: PaymentMethod, amount: number) => {
+    setPayments((prev) => {
+      const existing = prev.find((p) => p.method === method);
+      if (existing) return prev.map((p) => (p.method === method ? { ...p, amount } : p));
+      return [...prev, { method, amount }];
+    });
+  };
+
+  const payAllInCash = () => {
+    setPayments((prev) => {
+      const rest = prev.filter((p) => p.method !== "CASH");
+      const others = rest.reduce((s, p) => s + p.amount, 0);
+      const cashAmount = Math.max(0, Math.round((total - others) * 100) / 100);
+      return [...rest, { method: "CASH", amount: cashAmount }];
+    });
+  };
 
   const submit = () => {
     setActionError(undefined);
     if (lines.length === 0) {
       setActionError("أضف صنفًا واحدًا على الأقل");
+      return;
+    }
+    if (!paymentValid) {
+      setActionError("تأكد من صحة طرق الدفع — يجب أن يساوي إجمالي المدفوعات إجمالي الطلب");
       return;
     }
     const idempotencyKey =
@@ -420,14 +485,17 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
         items: lines.map((l) => ({
           productId: l.productId,
           quantity: l.quantity,
+          sugarLevel: l.supportsSugarOptions ? l.sugarLevel ?? undefined : undefined,
           notes: l.notes.trim() || undefined,
         })),
+        payments: payments.map((p) => ({ method: p.method, amount: Math.round(p.amount * 100) / 100 })),
+        cashTendered: cashTendered !== "" ? Number(cashTendered) : undefined,
         idempotencyKey,
         note: note.trim() || undefined,
         customerId: customer?.id,
       });
       if (res.order) {
-        onSuccess();
+        onSuccess(res.order);
       } else if (res.error) {
         setActionError(res.error);
       }
@@ -439,10 +507,13 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
       <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border bg-background p-5 shadow-lg">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold">طلب كافيه جديد</h2>
-          <Button variant="ghost" size="icon-sm" onClick={onSuccess} aria-label="إغلاق">
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="إغلاق">
             ✕
           </Button>
         </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          درجة السكر تُحدد لكل كوب على حدة — كوبان بدرجات مختلفة يفصلان تلقائيًا في الطلب.
+        </p>
 
         {actionError ? (
           <p className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
@@ -471,7 +542,12 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
                     className="flex w-full items-center justify-between px-3 py-2 text-start text-sm hover:bg-muted"
                     onClick={() => addProduct(p)}
                   >
-                    <span>{p.name}</span>
+                    <span>
+                      {p.name}
+                      {p.supportsSugarOptions ? (
+                        <span className="ms-2 text-xs text-muted-foreground">يحدد لها السكر</span>
+                      ) : null}
+                    </span>
                     <span className="font-semibold tabular-nums">{formatEgp(p.sellingPrice)}</span>
                   </button>
                 </li>
@@ -485,31 +561,32 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
         {lines.length > 0 ? (
           <ul className="mt-3 divide-y rounded-lg border bg-background">
             {lines.map((l) => (
-              <li key={l.productId} className="flex items-center gap-2 px-3 py-2">
-                <div className="flex-1">
-                  <p className="text-sm font-medium">{l.name}</p>
-                  <Input
-                    className="mt-1 h-7 w-40 text-xs"
-                    value={l.notes}
-                    placeholder="ملاحظة (بدون سكر...)"
-                    onChange={(e) =>
-                      setLines((prev) => prev.map((x) => (x.productId === l.productId ? { ...x, notes: e.target.value } : x)))
-                    }
-                  />
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="icon-xs" onClick={() => setQty(l.productId, -1)} aria-label="إنقاص">
-                    <MinusIcon />
+              <li key={l.id} className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{l.name}</p>
+                    {l.supportsSugarOptions ? <SugarChips value={l.sugarLevel} onChange={(s) => setSugar(l.id, s)} /> : null}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="icon-xs" onClick={() => setQty(l.id, -1)} aria-label="إنقاص">
+                      <MinusIcon />
+                    </Button>
+                    <span className="w-8 text-center font-bold tabular-nums">{l.quantity}</span>
+                    <Button variant="outline" size="icon-xs" onClick={() => setQty(l.id, 1)} aria-label="زيادة">
+                      <PlusIcon />
+                    </Button>
+                  </div>
+                  <p className="w-20 text-end text-sm font-semibold tabular-nums">{formatEgp(l.unitPrice * l.quantity)}</p>
+                  <Button variant="ghost" size="icon-xs" onClick={() => removeLine(l.id)} aria-label="حذف">
+                    <Trash2Icon />
                   </Button>
-                  <span className="w-8 text-center font-bold tabular-nums">{l.quantity}</span>
-                  <Button variant="outline" size="icon-xs" onClick={() => setQty(l.productId, 1)} aria-label="زيادة">
-                    <PlusIcon />
-                  </Button>
                 </div>
-                <p className="w-20 text-end font-semibold tabular-nums text-sm">{formatEgp(l.unitPrice * l.quantity)}</p>
-                <Button variant="ghost" size="icon-xs" onClick={() => removeLine(l.productId)} aria-label="حذف">
-                  <Trash2Icon />
-                </Button>
+                <Input
+                  className="mt-1.5 h-7 w-full max-w-xs text-xs"
+                  value={l.notes}
+                  placeholder="ملاحظة (اختياري)"
+                  onChange={(e) => setNotes(l.id, e.target.value)}
+                />
               </li>
             ))}
           </ul>
@@ -554,16 +631,121 @@ function OrderBuilder({ onSuccess }: { onSuccess: () => void }) {
           </div>
         </div>
 
+        <div className="mt-4 grid gap-3 rounded-lg border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-heading text-sm font-bold">طريقة الدفع</h3>
+            <p className="text-sm text-muted-foreground">
+              المطلوب: <span className="font-semibold tabular-nums">{formatEgp(total)}</span>
+            </p>
+          </div>
+
+          <Button type="button" variant="outline" size="sm" className="w-full justify-between" onClick={payAllInCash}>
+            <span>نقدي (دفع كامل)</span>
+            {hasCash ? <CheckIcon className="size-4" aria-hidden /> : null}
+          </Button>
+
+          <div className="grid gap-2">
+            {PAYMENT_METHODS.map((m) => {
+              const sel = payments.find((p) => p.method === m);
+              const active = Boolean(sel);
+              return (
+                <div key={m} className="rounded-lg border p-2">
+                  <Button
+                    type="button"
+                    variant={active ? "secondary" : "outline"}
+                    size="sm"
+                    className="w-full justify-between"
+                    onClick={() => {
+                      if (active) {
+                        setPayments((prev) => prev.filter((p) => p.method !== m));
+                      } else {
+                        setPaymentAmount(m, 0);
+                      }
+                    }}
+                  >
+                    <span>{PAYMENT_METHOD_LABELS[m]}</span>
+                    {active ? <CheckIcon className="size-4" aria-hidden /> : null}
+                  </Button>
+                  {active && sel ? (
+                    <div className="mt-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        value={Number.isFinite(sel.amount) ? sel.amount : ""}
+                        onChange={(e) => setPaymentAmount(m, Number(e.target.value) || 0)}
+                        placeholder="المبلغ"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {hasCash ? (
+            <div className="grid gap-2">
+              <label className="text-sm">المبلغ المدفوع نقدًا (المستلم)</label>
+              <Input
+                type="number"
+                min={0}
+                value={cashTendered}
+                onChange={(e) => setCashTendered(e.target.value)}
+                placeholder="0"
+              />
+              {!Number.isNaN(tenderedNum) && cashTendered !== "" ? (
+                tenderedNum < cashPaid ? (
+                  <p className="text-sm text-destructive">المبلغ النقدي أقل من المستحق نقدًا</p>
+                ) : (
+                  <p className="text-sm font-medium">الباقي: {formatEgp(change)}</p>
+                )
+              ) : null}
+            </div>
+          ) : null}
+
+          {!paymentValid ? (
+            <p className="text-sm text-muted-foreground">حدد طريقة دفع واضبط المبلغ ليطابق إجمالي الطلب.</p>
+          ) : null}
+        </div>
+
         <div className="mt-4 flex items-center justify-between border-t pt-4">
           <p className="text-lg font-bold">
             الإجمالي <span className="tabular-nums">{formatEgp(total)}</span>
           </p>
-          <Button onClick={submit} disabled={pending || lines.length === 0}>
+          <Button onClick={submit} disabled={pending || lines.length === 0 || !paymentValid}>
             {pending && <Loader2Icon className="size-4 animate-spin" aria-hidden />}
             إرسال إلى الباريستا
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SugarChips({
+  value,
+  onChange,
+}: {
+  value: CafeSugarLevel | null;
+  onChange: (s: CafeSugarLevel) => void;
+}) {
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="درجة السكر">
+      {SUGAR_CHOICES.map((s) => (
+        <button
+          key={s}
+          type="button"
+          aria-pressed={value === s}
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
+            value === s
+              ? "border-primary bg-primary text-primary-foreground"
+              : "bg-background text-muted-foreground hover:bg-muted",
+          )}
+          onClick={() => onChange(s)}
+        >
+          {CAFE_SUGAR_LABELS[s]}
+        </button>
+      ))}
     </div>
   );
 }

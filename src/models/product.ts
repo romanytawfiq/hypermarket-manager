@@ -29,6 +29,8 @@ export interface Product {
   minimumStock: number;
   /** Whether this product requires batch / expiry tracking. */
   trackExpiry: boolean;
+  /** Whether the café order builder offers sugar levels for this product (e.g. coffee). */
+  supportsSugarOptions: boolean;
   /** Whether the product may appear in the online store. */
   onlineVisible: boolean;
   description?: string;
@@ -68,6 +70,7 @@ const productSchema = new mongoose.Schema<Product>(
     sellingPrice: { type: Number, required: true, min: 0 },
     minimumStock: { type: Number, default: 0, min: 0 },
     trackExpiry: { type: Boolean, default: false },
+    supportsSugarOptions: { type: Boolean, default: false },
     onlineVisible: { type: Boolean, default: false },
     description: { type: String, default: "" },
     active: { type: Boolean, default: true, index: true },

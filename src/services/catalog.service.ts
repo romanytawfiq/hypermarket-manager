@@ -53,6 +53,7 @@ export interface ProductDto {
   sellingPrice: number;
   minimumStock: number;
   trackExpiry: boolean;
+  supportsSugarOptions: boolean;
   onlineVisible: boolean;
   description: string;
   active: boolean;
@@ -287,6 +288,7 @@ export async function createProduct(actor: AuthUser | null, input: ProductCreate
     sellingPrice: input.sellingPrice,
     minimumStock: input.minimumStock,
     trackExpiry: input.trackExpiry ?? false,
+    supportsSugarOptions: input.supportsSugarOptions ?? false,
     onlineVisible: input.onlineVisible ?? false,
     description: input.description || "",
     active: input.active ?? true,
@@ -350,6 +352,7 @@ export async function updateProduct(
   if (input.sellingPrice !== undefined) product.sellingPrice = input.sellingPrice;
   if (input.minimumStock !== undefined) product.minimumStock = input.minimumStock;
   if (input.trackExpiry !== undefined) product.trackExpiry = input.trackExpiry;
+  if (input.supportsSugarOptions !== undefined) product.supportsSugarOptions = input.supportsSugarOptions;
   if (input.onlineVisible !== undefined) product.onlineVisible = input.onlineVisible;
   if (input.description !== undefined) product.description = input.description || "";
   if (input.active !== undefined) product.active = input.active;
@@ -398,6 +401,7 @@ export async function getProduct(actor: AuthUser | null, id: string): Promise<Pr
       sellingPrice: number;
       minimumStock: number;
       trackExpiry: boolean;
+      supportsSugarOptions: boolean;
       onlineVisible: boolean;
       description?: string;
       active: boolean;
@@ -508,6 +512,7 @@ function toProductDto(
     sellingPrice: number;
     minimumStock: number;
     trackExpiry: boolean;
+    supportsSugarOptions: boolean;
     onlineVisible: boolean;
     description?: string;
     active: boolean;
@@ -534,6 +539,7 @@ function toProductDto(
     sellingPrice: p.sellingPrice,
     minimumStock: p.minimumStock,
     trackExpiry: p.trackExpiry,
+    supportsSugarOptions: p.supportsSugarOptions,
     onlineVisible: p.onlineVisible,
     description: p.description ?? "",
     active: p.active,

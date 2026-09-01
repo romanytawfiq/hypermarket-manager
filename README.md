@@ -6,8 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 7 Complete (Café / KDS)**
-> Phases 0–6 plus the Dashboard Overview redesign and the POS camera barcode scanner are complete, and now **Phase 7 — Café Orders & Barista KDS** is implemented: cashier café-order creation, a barista Kitchen Display System, and server-authoritative realtime via a transactional outbox + SSE. See [Development Status](#development-status).
+> **Status: Phase 7.1 Complete (Café / KDS)**
+> Phases 0–6 plus the Dashboard Overview redesign and the POS camera barcode scanner are complete, and now **Phase 7 — Café Orders & Barista KDS** plus **Phase 7.1 — café payment integration & per-cup sugar options** are implemented: cashier café-order creation with per-cup sugar levels and payment at checkout (Sale + payments + inventory + shift effect commit atomically with the order), a barista Kitchen Display System, and server-authoritative realtime via a transactional outbox + SSE. See [Development Status](#development-status).
 > Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). The Dashboard Overview redesign (role-aware business analytics, KPIs, sales trends, inventory alerts, financial summaries) and the POS **camera barcode scanner** are complete. See [Development Status](#development-status).
 
 ---
@@ -277,7 +277,11 @@ Configurable expense categories and an expenses log (`EXP-YYYYMMDD-NNNN`, idempo
 
 ### Phase 7 — Café / KDS (Implemented)
 
-Cashier café-order creation (product search, line/order notes, optional customer, idempotent submit) and a barista **Kitchen Display System** (`/kds`) with a three-column board (جديد / قيد التحضير / جاهز), large touch actions, and a live 1-second age timer. The server is authoritative: a server-enforced state machine (`NEW → PREPARING → READY → COMPLETED`, plus permission-checked `CANCELLED`) with optimistic concurrency, and realtime delivery through a transactional outbox + SSE that resumes by monotonic sequence and dedupes by `eventId`, reconciling full server state on reconnect. Café permissions are role-gated (`cafe.orders.*` / `cafe.kds.view`); the cashier and barista UIs stay operational-only in this phase — no Sale, payment, or inventory deduction (documented limitation).
+Cashier café-order creation and a barista **Kitchen Display System** (`/kds`) with a three-column board (جديد / قيد التحضير / جاهز), large touch actions, and a live 1-second age timer. The server is authoritative: a server-enforced state machine (`NEW → PREPARING → READY → COMPLETED`, plus permission-checked `CANCELLED`) with optimistic concurrency, and realtime delivery through a transactional outbox + SSE that resumes by monotonic sequence and dedupes by `eventId`, reconciling full server state on reconnect. Café permissions are role-gated (`cafe.orders.*` / `cafe.kds.view`).
+
+### Phase 7.1 — Café Payment Integration & Per-Cup Sugar (Implemented)
+
+Creating a café order now posts the **financial Sale** in the same MongoDB transaction as the order: payments (full payment; mixed methods supported, cash tendered + change), sellable-stock deduction, customer snapshot, and the cashier-shift effect all commit atomically — no second ledger, and `CafeOrder.totalAmount` can never diverge from `Sale.total`. The order stores a stable `saleId` link + the invoice number (`INV-…`). **Per-cup sugar** is a first-class structured option (سادة / ريحة / مزبوط / مانو / زيادة / فوق الزيادة / كراميل): different-sugar cups are always separate order lines (never merged) and products must advertise `supportsSugarOptions` to accept a sugar choice. Cancellation remains operational — the linked Sale is never mutated.
 
 The phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
 

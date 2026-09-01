@@ -209,9 +209,279 @@ export async function posSearchProducts(
 }
 
 /**
- * Creates a completed sale. The server validates products, computes all totals,
- * validates payments, and consumes stock atomically with the shift association.
- * Requires `sales.create` and an active OPEN shift for the cashier.
+ * Creates a completed sale inside an existing MongoDB transaction (shared
+ * session). This is the canonical financial core used by both the POS
+ * (`createSale`) and the café checkout (`createCafeOrder`), so a café order's
+ * Sale + payments + inventory live inside a single transaction boundary and
+ * can never diverge from the café order itself. The caller owns the session;
+ * on any validation failure the whole transaction rolls back (no partial
+ * financial state).
+ *
+ * The server validates products, computes all totals, validates payments, and
+ * consumes stock atomically with the shift association. Requires `sales.create`
+ * and an active OPEN shift for the cashier.
+ */
+export async function createSaleWithSession(
+  actor: AuthUser,
+  input: SaleCreateInput,
+  session: mongoose.ClientSession,
+): Promise<SaleDocument> {
+  const authed = requirePermission(actor, "sales.create");
+
+  const shiftId = await activeShiftId(authed.id);
+  if (!shiftId) {
+    throw new AppError("CONFLICT", "افتح وردية أولاً قبل البدء بالبيع");
+  }
+
+  // Idempotency: replaying the same key returns the existing sale (no re-deduct).
+  if (input.idempotencyKey) {
+    const existing = await SaleModel.findOne({ idempotencyKey: input.idempotencyKey })
+      .session(session)
+      .lean<SaleDocument>();
+    if (existing) {
+      return existing;
+    }
+  }
+
+  // Aggregate requested quantities per product so duplicate lines for the same
+  // product (e.g. café per-cup lines with different sugar) are validated against
+  // the *combined* quantity — a line can never oversell hidden behind a sibling.
+  const totalQtyByProduct = new Map<string, number>();
+  for (const line of input.items) {
+    totalQtyByProduct.set(line.productId, (totalQtyByProduct.get(line.productId) ?? 0) + line.quantity);
+  }
+
+  // Build items with server-authoritative data (price snapshot, cost snapshot).
+  const saleItems: Array<{
+    product: mongoose.Types.ObjectId;
+    productName: string;
+    unitPrice: number;
+    quantity: number;
+    lineTotal: number;
+    cost: number;
+    trackExpiry: boolean;
+  }> = [];
+  let totalAmount = 0;
+
+  for (const item of input.items) {
+    const product = await ProductModel.findById(item.productId)
+      .session(session)
+      .select("name sellingPrice purchaseCost trackExpiry active unit")
+      .lean<{
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        sellingPrice: number;
+        purchaseCost: number;
+        trackExpiry: boolean;
+        active: boolean;
+        unit: string;
+      }>();
+    if (!product) {
+      throw new AppError("NOT_FOUND", "أحد المنتجات غير موجود");
+    }
+    if (!product.active) {
+      throw new AppError("CONFLICT", `المنتج '${product.name}' غير متاح للبيع`);
+    }
+
+    // Revalidate current sellable stock server-side (BR-010 / architecture §10).
+    const stock = await getSellableStock(item.productId, product.trackExpiry);
+    if (stock.sellable < (totalQtyByProduct.get(item.productId) ?? item.quantity)) {
+      throw new AppError(
+        "CONFLICT",
+        `لا يوجد مخزون كافٍ من '${product.name}'. المتاح: ${stock.sellable} ${product.unit}`,
+      );
+    }
+
+    const unitPrice = Math.round(product.sellingPrice * 100) / 100;
+    const lineTotal = Math.round(unitPrice * item.quantity * 100) / 100;
+    totalAmount = Math.round((totalAmount + lineTotal) * 100) / 100;
+    saleItems.push({
+      product: product._id,
+      productName: product.name,
+      unitPrice,
+      quantity: item.quantity,
+      lineTotal,
+      cost: Math.round(product.purchaseCost * 100) / 100,
+      trackExpiry: product.trackExpiry,
+    });
+  }
+
+  // Payments are server-authoritative. Phase 4 requires full payment; Phase 5
+  // allows an on-account (credit) sale to be partially or fully unpaid
+  // (BR-011/BR-012), with the remainder becoming a receivable.
+  const payments: Array<{ method: PaymentMethod; amount: number; status: "CONFIRMED" }> =
+    input.payments.map((p) => ({ method: p.method as PaymentMethod, amount: p.amount, status: "CONFIRMED" }));
+  const paidTotal = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+  if (paidTotal > totalAmount + 0.001) {
+    throw new AppError("VALIDATION", "المبلغ المدفوع يتجاوز إجمالي الفاتورة");
+  }
+
+  // Resolve the linked customer + enforce credit policy server-side (BR-001,
+  // BR-011, architecture §12 credit approval / §25 credit limit).
+  let linkedCustomer: {
+    customer: { _id: mongoose.Types.ObjectId; name: string; active: boolean; allowCredit: boolean; creditLimit: number | null };
+  } | null = null;
+  if (input.customerId) {
+    const customer = await CustomerModel.findById(input.customerId)
+      .session(session)
+      .select("name active allowCredit creditLimit")
+      .lean<{
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        active: boolean;
+        allowCredit: boolean;
+        creditLimit: number | null;
+      }>();
+    if (!customer) throw new AppError("NOT_FOUND", "العميل غير موجود");
+    if (!customer.active) throw new AppError("CONFLICT", "العميل غير نشط");
+    linkedCustomer = { customer };
+  }
+
+  const onCredit = Boolean(input.onCredit);
+  let balanceDue = 0;
+  let paymentState: SalePaymentState = "PAID";
+
+  if (onCredit) {
+    if (!linkedCustomer) {
+      throw new AppError("VALIDATION", "اختر العميل للبيع على الحساب");
+    }
+    const { customer } = linkedCustomer;
+    if (!customer.allowCredit) {
+      throw new AppError("CONFLICT", "لا يُسمح بهذا العميل بالشراء على الحساب");
+    }
+    balanceDue = Math.round((totalAmount - paidTotal) * 100) / 100;
+    paymentState = Math.abs(paidTotal - totalAmount) < 0.001 ? "PAID" : paidTotal === 0 ? "UNPAID" : "PARTIAL";
+
+    // Enforce a per-customer credit cap when configured (default null = unlimited).
+    if (customer.creditLimit != null && balanceDue > 0) {
+      const outstanding = await outstandingBalance(customer._id.toString(), session);
+      if (outstanding + balanceDue > customer.creditLimit + 0.001) {
+        throw new AppError(
+          "CONFLICT",
+          `تجاوز ذلك حد الائتمان المسموح للعميل (${customer.creditLimit.toLocaleString("ar-EG")} ج.م)`,
+        );
+      }
+    }
+  } else if (Math.abs(paidTotal - totalAmount) > 0.001) {
+    throw new AppError(
+      "VALIDATION",
+      `المبلغ المدفوع (${paidTotal.toLocaleString("ar-EG")} ج.م) لا يساوي إجمالي الفاتورة (${totalAmount.toLocaleString("ar-EG")} ج.م)`,
+    );
+  }
+
+  // Cash change calculation (server-side, BR-001).
+  let cashTendered: number | undefined;
+  let change = 0;
+  const cashPaid = payments.filter((p) => isCashMethod(p.method)).reduce((s, p) => s + p.amount, 0);
+  if (input.cashTendered !== undefined && input.cashTendered > 0 && cashPaid > 0) {
+    if (input.cashTendered < cashPaid - 0.001) {
+      throw new AppError("VALIDATION", "المبلغ النقدي المدفوع أقل من المبلغ المستحق نقدًا");
+    }
+    cashTendered = Math.round(input.cashTendered * 100) / 100;
+    change = Math.round((cashTendered - cashPaid) * 100) / 100;
+  }
+
+  // Concurrency-safe invoice number (atomic sequence).
+  const now = new Date();
+  const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const seq = await nextSequenceValue(`sale-${dayKey}`, session);
+  const invoiceNumber = `${INVOICE_PREFIX}-${dayKey}-${String(seq).padStart(4, "0")}`;
+
+  const [sale] = await SaleModel.create(
+    [
+      {
+        invoiceNumber,
+        cashier: { id: authed.id, username: authed.username },
+        shift: new mongoose.Types.ObjectId(shiftId),
+        customer: linkedCustomer
+          ? { id: linkedCustomer.customer._id.toString(), name: linkedCustomer.customer.name }
+          : input.customerName
+            ? { name: input.customerName.trim() }
+            : undefined,
+        items: saleItems.map((i) => ({
+          product: i.product,
+          productName: i.productName,
+          unitPrice: i.unitPrice,
+          quantity: i.quantity,
+          lineTotal: i.lineTotal,
+          cost: i.cost,
+          discount: 0,
+        })),
+        totalAmount,
+        totalPaid: paidTotal,
+        balanceDue,
+        paymentState,
+        payments,
+        status: "COMPLETED",
+        cashTendered,
+        change: change > 0 ? change : 0,
+        idempotencyKey: input.idempotencyKey,
+        createdBy: { id: authed.id, username: authed.username },
+      },
+    ],
+    { session },
+  );
+  if (!sale) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء حفظ البيع");
+
+  // Decrease inventory atomically (SALE movements + FEFO batches + version guard).
+  await consumeStockForSale(
+    authed,
+    saleItems.map((i) => ({
+      productId: i.product.toString(),
+      productName: i.productName,
+      quantity: i.quantity,
+      trackExpiry: i.trackExpiry,
+    })),
+    { referenceId: sale._id.toString(), session },
+  );
+
+  // Create a customer receivable (CREDIT_SALE ledger entry) for the unpaid
+  // remainder (BR-012). The ledger is the authoritative source of the balance.
+  if (linkedCustomer && balanceDue > 0) {
+    await CustomerLedgerModel.create(
+      [
+        {
+          customer: linkedCustomer.customer._id,
+          type: "CREDIT_SALE" as const,
+          amount: balanceDue,
+          referenceType: "SALE",
+          referenceId: sale._id.toString(),
+          description: `بيع آجل (${invoiceNumber})`,
+        },
+      ],
+      { session },
+    );
+  }
+
+  await recordAudit({
+    actorId: authed.id,
+    actorUsername: authed.username,
+    action: "sale.created",
+    entity: "sale",
+    entityId: sale._id.toString(),
+    after: {
+      invoiceNumber,
+      shiftId,
+      totalAmount,
+      paidTotal,
+      balanceDue,
+      paymentState,
+      customerId: linkedCustomer?.customer._id.toString(),
+      payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
+      itemCount: saleItems.length,
+    },
+  });
+
+  const doc = await SaleModel.findById(sale._id).session(session).lean<SaleDocument>();
+  if (!doc) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء حفظ البيع");
+  return doc;
+}
+
+/**
+ * Creates a completed sale (POS). Requires `sales.create` and an active OPEN
+ * shift for the cashier. Delegates to `createSaleWithSession` inside its own
+ * transaction so the sale, payments, inventory, and audit commit or roll back
+ * together.
  */
 export async function createSale(
   actor: AuthUser | null,
@@ -220,245 +490,8 @@ export async function createSale(
   const authed = requirePermission(actor, "sales.create");
   await dbConnect();
 
-  const shiftId = await activeShiftId(authed.id);
-  if (!shiftId) {
-    throw new AppError("CONFLICT", "افتح وردية أولاً قبل البدء بالبيع");
-  }
-
   return withTransaction(async (session) => {
-    // Idempotency: replaying the same key returns the existing sale (no re-deduct).
-    if (input.idempotencyKey) {
-      const existing = await SaleModel.findOne({ idempotencyKey: input.idempotencyKey })
-        .session(session)
-        .lean<SaleDocument>();
-      if (existing) {
-        return toSaleDto(existing);
-      }
-    }
-
-    // Build items with server-authoritative data (price snapshot, cost snapshot).
-    const saleItems: Array<{
-      product: mongoose.Types.ObjectId;
-      productName: string;
-      unitPrice: number;
-      quantity: number;
-      lineTotal: number;
-      cost: number;
-      trackExpiry: boolean;
-    }> = [];
-    let totalAmount = 0;
-
-    for (const item of input.items) {
-      const product = await ProductModel.findById(item.productId)
-        .session(session)
-        .select("name sellingPrice purchaseCost trackExpiry active unit")
-        .lean<{
-          _id: mongoose.Types.ObjectId;
-          name: string;
-          sellingPrice: number;
-          purchaseCost: number;
-          trackExpiry: boolean;
-          active: boolean;
-          unit: string;
-        }>();
-      if (!product) {
-        throw new AppError("NOT_FOUND", "أحد المنتجات غير موجود");
-      }
-      if (!product.active) {
-        throw new AppError("CONFLICT", `المنتج '${product.name}' غير متاح للبيع`);
-      }
-
-      // Revalidate current sellable stock server-side (BR-010 / architecture §10).
-      const stock = await getSellableStock(item.productId, product.trackExpiry);
-      if (stock.sellable < item.quantity) {
-        throw new AppError(
-          "CONFLICT",
-          `لا يوجد مخزون كافٍ من '${product.name}'. المتاح: ${stock.sellable} ${product.unit}`,
-        );
-      }
-
-      const unitPrice = Math.round(product.sellingPrice * 100) / 100;
-      const lineTotal = Math.round(unitPrice * item.quantity * 100) / 100;
-      totalAmount = Math.round((totalAmount + lineTotal) * 100) / 100;
-      saleItems.push({
-        product: product._id,
-        productName: product.name,
-        unitPrice,
-        quantity: item.quantity,
-        lineTotal,
-        cost: Math.round(product.purchaseCost * 100) / 100,
-        trackExpiry: product.trackExpiry,
-      });
-    }
-
-    // Payments are server-authoritative. Phase 4 requires full payment; Phase 5
-    // allows an on-account (credit) sale to be partially or fully unpaid
-    // (BR-011/BR-012), with the remainder becoming a receivable.
-    const payments: Array<{ method: PaymentMethod; amount: number; status: "CONFIRMED" }> =
-      input.payments.map((p) => ({ method: p.method as PaymentMethod, amount: p.amount, status: "CONFIRMED" }));
-    const paidTotal = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100;
-    if (paidTotal > totalAmount + 0.001) {
-      throw new AppError("VALIDATION", "المبلغ المدفوع يتجاوز إجمالي الفاتورة");
-    }
-
-    // Resolve the linked customer + enforce credit policy server-side (BR-001,
-    // BR-011, architecture §12 credit approval / §25 credit limit).
-    let linkedCustomer: {
-      customer: { _id: mongoose.Types.ObjectId; name: string; active: boolean; allowCredit: boolean; creditLimit: number | null };
-    } | null = null;
-    if (input.customerId) {
-      const customer = await CustomerModel.findById(input.customerId)
-        .session(session)
-        .select("name active allowCredit creditLimit")
-        .lean<{
-          _id: mongoose.Types.ObjectId;
-          name: string;
-          active: boolean;
-          allowCredit: boolean;
-          creditLimit: number | null;
-        }>();
-      if (!customer) throw new AppError("NOT_FOUND", "العميل غير موجود");
-      if (!customer.active) throw new AppError("CONFLICT", "العميل غير نشط");
-      linkedCustomer = { customer };
-    }
-
-    const onCredit = Boolean(input.onCredit);
-    let balanceDue = 0;
-    let paymentState: SalePaymentState = "PAID";
-
-    if (onCredit) {
-      if (!linkedCustomer) {
-        throw new AppError("VALIDATION", "اختر العميل للبيع على الحساب");
-      }
-      const { customer } = linkedCustomer;
-      if (!customer.allowCredit) {
-        throw new AppError("CONFLICT", "لا يُسمح بهذا العميل بالشراء على الحساب");
-      }
-      balanceDue = Math.round((totalAmount - paidTotal) * 100) / 100;
-      paymentState = Math.abs(paidTotal - totalAmount) < 0.001 ? "PAID" : paidTotal === 0 ? "UNPAID" : "PARTIAL";
-
-      // Enforce a per-customer credit cap when configured (default null = unlimited).
-      if (customer.creditLimit != null && balanceDue > 0) {
-        const outstanding = await outstandingBalance(customer._id.toString(), session);
-        if (outstanding + balanceDue > customer.creditLimit + 0.001) {
-          throw new AppError(
-            "CONFLICT",
-            `تجاوز ذلك حد الائتمان المسموح للعميل (${customer.creditLimit.toLocaleString("ar-EG")} ج.م)`,
-          );
-        }
-      }
-    } else if (Math.abs(paidTotal - totalAmount) > 0.001) {
-      throw new AppError(
-        "VALIDATION",
-        `المبلغ المدفوع (${paidTotal.toLocaleString("ar-EG")} ج.م) لا يساوي إجمالي الفاتورة (${totalAmount.toLocaleString("ar-EG")} ج.م)`,
-      );
-    }
-
-    // Cash change calculation (server-side, BR-001).
-    let cashTendered: number | undefined;
-    let change = 0;
-    const cashPaid = payments.filter((p) => isCashMethod(p.method)).reduce((s, p) => s + p.amount, 0);
-    if (input.cashTendered !== undefined && input.cashTendered > 0 && cashPaid > 0) {
-      if (input.cashTendered < cashPaid - 0.001) {
-        throw new AppError("VALIDATION", "المبلغ النقدي المدفوع أقل من المبلغ المستحق نقدًا");
-      }
-      cashTendered = Math.round(input.cashTendered * 100) / 100;
-      change = Math.round((cashTendered - cashPaid) * 100) / 100;
-    }
-
-    // Concurrency-safe invoice number (atomic sequence).
-    const now = new Date();
-    const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-    const seq = await nextSequenceValue(`sale-${dayKey}`, session);
-    const invoiceNumber = `${INVOICE_PREFIX}-${dayKey}-${String(seq).padStart(4, "0")}`;
-
-    const [sale] = await SaleModel.create(
-      [
-        {
-          invoiceNumber,
-          cashier: { id: authed.id, username: authed.username },
-          shift: new mongoose.Types.ObjectId(shiftId),
-          customer: linkedCustomer
-            ? { id: linkedCustomer.customer._id.toString(), name: linkedCustomer.customer.name }
-            : input.customerName
-              ? { name: input.customerName.trim() }
-              : undefined,
-          items: saleItems.map((i) => ({
-            product: i.product,
-            productName: i.productName,
-            unitPrice: i.unitPrice,
-            quantity: i.quantity,
-            lineTotal: i.lineTotal,
-            cost: i.cost,
-            discount: 0,
-          })),
-          totalAmount,
-          totalPaid: paidTotal,
-          balanceDue,
-          paymentState,
-          payments,
-          status: "COMPLETED",
-          cashTendered,
-          change: change > 0 ? change : 0,
-          idempotencyKey: input.idempotencyKey,
-          createdBy: { id: authed.id, username: authed.username },
-        },
-      ],
-      { session },
-    );
-    if (!sale) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء حفظ البيع");
-
-    // Decrease inventory atomically (SALE movements + FEFO batches + version guard).
-    await consumeStockForSale(
-      authed,
-      saleItems.map((i) => ({
-        productId: i.product.toString(),
-        productName: i.productName,
-        quantity: i.quantity,
-        trackExpiry: i.trackExpiry,
-      })),
-      { referenceId: sale._id.toString(), session },
-    );
-
-    // Create a customer receivable (CREDIT_SALE ledger entry) for the unpaid
-    // remainder (BR-012). The ledger is the authoritative source of the balance.
-    if (linkedCustomer && balanceDue > 0) {
-      await CustomerLedgerModel.create(
-        [
-          {
-            customer: linkedCustomer.customer._id,
-            type: "CREDIT_SALE" as const,
-            amount: balanceDue,
-            referenceType: "SALE",
-            referenceId: sale._id.toString(),
-            description: `بيع آجل (${invoiceNumber})`,
-          },
-        ],
-        { session },
-      );
-    }
-
-    await recordAudit({
-      actorId: authed.id,
-      actorUsername: authed.username,
-      action: "sale.created",
-      entity: "sale",
-      entityId: sale._id.toString(),
-      after: {
-        invoiceNumber,
-        shiftId,
-        totalAmount,
-        paidTotal,
-        balanceDue,
-        paymentState,
-        customerId: linkedCustomer?.customer._id.toString(),
-        payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
-        itemCount: saleItems.length,
-      },
-    });
-
-    const doc = await SaleModel.findById(sale._id).session(session).lean<SaleDocument>();
-    if (!doc) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء حفظ البيع");
+    const doc = await createSaleWithSession(authed, input, session);
     return toSaleDto(doc);
   });
 }

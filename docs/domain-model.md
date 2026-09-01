@@ -103,6 +103,7 @@ Implemented fields:
 - `sellingPrice` — current catalog selling price; min 0
 - `minimumStock` — integer low-stock threshold (default 0)
 - `trackExpiry` — boolean; enables batch/expiry tracking (default `false`)
+- `supportsSugarOptions` — boolean (default `false`); advertising that the café order builder offers a structured per-cup sugar level for this product (Phase 7.1). Selectable/settable when listing products; validation rejects a sugar choice for products without it.
 - `onlineVisible` — boolean; whether the product appears in the online store (default `false`)
 - `description` — optional text
 - `active` — boolean (default `true`); deactivated products are hidden from normal selection but historical documents continue referencing them (BR-004)
@@ -433,15 +434,17 @@ Persisted shape (`src/models/cafe-order.ts`):
 
 - `orderNumber` — business number `CF-YYYYMMDD-NNNN` (per-day sequence).
 - `status` — lifecycle state (see §15 below).
-- `items` — immutable snapshot of ordered lines.
+- `items` — immutable snapshot of ordered lines (each line carries its own `sugarLevel`, see CafeOrderItem).
 - `note` + per-line `notes` — order-level and line-level free-text notes (no modifiers in Phase 7).
 - `customerId` — optional customer association (attached, never required).
+- `saleId` — stable reference to the authoritative `Sale` created in the same transaction (unique, sparse).
+- `invoiceNumber` — snapshot of the linked Sale's invoice number (`INV-…`) for display.
 - `statusHistory` — embedded transition history (from → to, by, at) for audit and idempotency.
 - `version` — optimistic-concurrency counter (BSON pattern for atomic transitions).
 - `idempotencyKey` — unique, sparse; guards duplicate cashier submissions.
 - `createdAt` / `updatedAt`.
 
-A café order is **operational only** in Phase 7: it carries no Payment array and does not create a Sale or inventory movement. Financial checkout and ingredient inventory are deferred (see business rules and Known Limitations).
+A café order is created at **checkout together with its financial Sale** in one MongoDB transaction: payments, customer snapshot, inventory, and the cashier shift effect commit atomically with the order (Phase 7.1). `saleId`/`invoiceNumber` link the two records; the totals can never diverge because the order snapshots items/total from the Sale's authoritative lines. Ingredient/recipe deduction is still not modeled (deferred); a café order deducts the sold catalog product(s) like any POS sale.
 
 ## CafeOrderItem
 
@@ -449,6 +452,7 @@ Represents a line inside a café order — a product snapshot for price history.
 
 - `productId` — reference to the catalog product (price/total are derived server-side at creation and snapshotted).
 - `productName`, `unitPrice`, `quantity`, `lineTotal` — frozen at creation.
+- `sugarLevel` — optional per-cup sugar level (`CafeSugarLevel` enum, Phase 7.1): `PLAIN`/`LIGHT`/`MEDIUM`/`STANDARD`/`EXTRA`/`EXTRA_EXTRA`/`CARAMEL`. Two cups with different sugar are separate lines and never merge; absent on legacy orders. Display label is Arabic via `lib/cafe/sugar.ts`.
 - `notes` — per-line note.
 
 ## EventOutbox (Café realtime)
@@ -655,9 +659,8 @@ MongoDB persistence must be designed based on:
 Before final schema design, investigate:
 
 - stock reservation for online orders
-- caf�? ingredient inventory
-- shared inventory between caf�? and retail
-- caf�? order payment / checkout integration (deferred in Phase 7)
+- café ingredient inventory (recipe deduction per sold product)
+- shared inventory between café and retail
 - customer credit limit
 - supplier credit limit
 - tax model

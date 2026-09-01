@@ -1,12 +1,23 @@
 import mongoose, { type Model, type SchemaTimestampsConfig } from "mongoose";
+import { CAFE_SUGAR_LEVELS, type CafeSugarLevel } from "@/lib/cafe/sugar";
 
 /**
- * CafeOrder (Phase 7).
+ * CafeOrder (Phase 7, extended in 7.1).
  *
- * A café order is an *operational* order flowing from cashier to the Barista
- * KDS. Each line snapshots the product name, unit price, quantity, and a
- * per-line note so later catalog/price changes cannot corrupt history
- * (mirrors BR-006). The order carries an order-level note too ("بدون سكر").
+ * A café order flows from the cashier to the Barista KDS. Each line snapshots
+ * the product name, unit price, quantity, an optional sugar level, and a
+ * per-line note/customization so later catalog/price changes cannot corrupt
+ * history (mirrors BR-006). Sugar belongs to the individual cup: two cups of
+ * the same product with different sugar levels are separate order lines and
+ * are never merged.
+ *
+ * Financial integration (Phase 7.1): creating an order also records the retail
+ * Sale + payment through the existing sales service (`createSaleWithSession`)
+ * inside the same MongoDB transaction. `saleId`/`invoiceNumber` link the
+ * operational order to its immutable financial record (authoritative); the
+ * order does not duplicate payment documents. `CafeOrder.totalAmount` and
+ * `Sale.total`/`Payment.total` are computed from the same server-side source so
+ * they cannot diverge.
  *
  * The lifecycle is a server-validated state machine:
  *
@@ -18,10 +29,6 @@ import mongoose, { type Model, type SchemaTimestampsConfig } from "mongoose";
  * (`findOneAndUpdate`), so a stale/concurrent writer is rejected rather than
  * silently overwriting state; `statusHistory` preserves the full audit trail of
  * transitions (idempotent, replay-safe).
- *
- * Financial note: Phase 7 treats café order creation as operational only. Sale /
- * payment recording for café orders is a separate, later concern and is NOT
- * performed here (documented limitation).
  */
 export const CAFE_ORDER_STATUSES = [
   "NEW",
@@ -47,7 +54,9 @@ export interface CafeOrderItem {
   unitPrice: number;
   quantity: number;
   lineTotal: number;
-  /** Per-line note, e.g. "بدون سكر". */
+  /** Structured per-cup sugar level snapshot ("no sugar selection recorded" when absent). */
+  sugarLevel?: CafeSugarLevel;
+  /** Per-line note / customization, e.g. "حليب إضافي". */
   notes?: string;
 }
 
@@ -58,11 +67,11 @@ export interface CafeStatusHistoryEntry {
 }
 
 export interface CafeOrder {
-  orderNumber: string; // "CF-YYYYMMDD-NNNN"
+  orderNumber: string; // "CF-YYYYMMDD-NNNN" (distinct from the INV-… sale invoice number)
   items: CafeOrderItem[];
   totalAmount: number;
   status: CafeOrderStatus;
-  /** Optional linked customer (association only — no financial posting here). */
+  /** Optional linked customer (snapshot only; the Sale carries the financial link). */
   customerId?: mongoose.Types.ObjectId;
   customerName?: string;
   /** Order-level note, e.g. "حليب إضافي". */
@@ -72,6 +81,10 @@ export interface CafeOrder {
   statusHistory: CafeStatusHistoryEntry[];
   createdBy?: { id?: string; username?: string };
   idempotencyKey?: string;
+  /** Stable id of the immutable Sale recorded for this order (authoritative financial doc). */
+  saleId?: string;
+  /** Snapshot of the Sale invoice number for display/history (e.g. "INV-20260831-0001"). */
+  invoiceNumber?: string;
   cancelledAt?: Date;
   completedAt?: Date;
 }
@@ -94,6 +107,7 @@ const cafeOrderSchema = new mongoose.Schema<CafeOrder>(
           unitPrice: { type: Number, required: true, min: 0 },
           quantity: { type: Number, required: true, min: 1 },
           lineTotal: { type: Number, required: true, min: 0 },
+          sugarLevel: { type: String, enum: CAFE_SUGAR_LEVELS },
           notes: { type: String, trim: true, maxlength: 200, default: "" },
         },
       ],
@@ -115,6 +129,11 @@ const cafeOrderSchema = new mongoose.Schema<CafeOrder>(
     customerName: { type: String, trim: true, maxlength: 200, default: "" },
     note: { type: String, trim: true, maxlength: 500, default: "" },
     version: { type: Number, default: 0 },
+    saleId: {
+      type: String,
+      index: { unique: true, sparse: true },
+    },
+    invoiceNumber: { type: String, trim: true, maxlength: 40, default: "" },
     statusHistory: {
       type: [
         {

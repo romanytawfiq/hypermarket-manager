@@ -53,6 +53,8 @@ export async function createCafeOrderAction(input: CafeOrderCreateInput): Promis
   if (!p.ok) return { error: p.error };
   try {
     const order = await createCafeOrder(await getCurrentUser(), p.data);
+    revalidatePath("/cafe");
+    revalidatePath("/kds");
     return { order };
   } catch (error) {
     return { error: resolveError(error).userMessage };

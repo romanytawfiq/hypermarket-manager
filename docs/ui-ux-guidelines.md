@@ -448,11 +448,13 @@ Potential columns:
 
 Avoid excessive information inside each card.
 
-**Phase 7 (implemented) specifics for the KDS board (`/kds`) and cashier café screen (`/cafe`):**
+**Phase 7 / 7.1 (implemented) specifics for the KDS board (`/kds`) and cashier café screen (`/cafe`):**
 
 - Three board columns: `جديد` / `قيد التحضير` / `جاهز`; a completed order leaves the live board.
 - A large order short-code plus a 1-second age timer (e.g. `منذ 04:32`) per card — readable from meters away; status color is never the only signal (a text label also communicates state).
-- Primary actions are large, obvious touch targets: `بدء التحضير`, `جاهز`, `تم التسليم`, `إلغاء` — gated by role/status (barista advances; cancellation is a separate permitted action).
+- Each item shows its structured sugar level as a text badge (e.g. `مانو`, `زيادة`) distinct from free-text notes; color is never the only signal.
+- Primary actions are large, obvious touch targets: `بدء التحضير`, `جاهز`, `تم التسليم`, `إلغاء` — gated by role/status (barista advances; cancellation is a separate permitted action). Action buttons busy-lock only their own order, never the whole board.
+- In the order builder, sugar is chosen per cup via small segmented chips (سادة / ريحة / مزبوط / مانو / زيادة / فوق الزيادة / كراميل) only for sugar-capable products; changing a multi-cup line's sugar visibly splits one cup off. Payment mirrors the POS: method toggles with amounts, cash tendered + change, and a clear "المدفوعات يجب أن تساوي الإجمالي" hint until the payment matches.
 - A small, non-intrusive connection badge shows `متصل` / `جارٍ الاتصال` / `إعادة الاتصال`; it never blocks the board and does not flash.
 - On (re)connect the board refetches server state and resumes the realtime stream, so it stays correct without any manual refresh.
 

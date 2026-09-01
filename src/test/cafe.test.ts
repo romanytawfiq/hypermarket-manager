@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import mongoose from "mongoose";
 import { AppError } from "@/lib/errors";
-import { ProductModel } from "@/models/product";
 import { CafeOrderModel } from "@/models/cafe-order";
+import { SaleModel } from "@/models/sale";
+import { createCategory, createProduct } from "@/services/catalog.service";
 import {
   createCafeOrder,
   transitionCafeOrder,
@@ -12,7 +13,10 @@ import {
   pollOutboxEvents,
   latestOutboxSequence,
 } from "@/services/cafe.service";
+import { openShift, computeExpectedCash } from "@/services/shift.service";
+import { receivePurchaseStock, getSellableStock } from "@/services/inventory.service";
 import { resetDb, createUser, buildAuthUser } from "@/test/helpers";
+import type { CafeSugarLevel } from "@/lib/cafe/sugar";
 
 let counter = 0;
 async function freshActor(role: "MANAGER" | "CASHIER" | "BARISTA" | "ACCOUNTANT" | "OWNER") {
@@ -21,20 +25,42 @@ async function freshActor(role: "MANAGER" | "CASHIER" | "BARISTA" | "ACCOUNTANT"
   return buildAuthUser(u);
 }
 
-async function makeProduct(name: string, price: number) {
-  const categoryId = new mongoose.Types.ObjectId();
-  const p = await ProductModel.create({
+interface TestItem {
+  productId: string;
+  quantity: number;
+  notes?: string;
+  sugarLevel?: CafeSugarLevel;
+}
+
+const prices = new Map<string, number>();
+
+async function makeProduct(name: string, price: number, opts: { stock: number; supportsSugarOptions?: boolean }) {
+  const cat = await createCategory(manager, { name: `فئة ${name}` });
+  const p = await createProduct(manager, {
     name,
-    category: categoryId,
+    categoryId: cat.id,
     unit: "قطعة",
     purchaseCost: Math.round(price * 0.5),
     sellingPrice: price,
     minimumStock: 0,
     trackExpiry: false,
-    onlineVisible: false,
-    active: true,
+    supportsSugarOptions: opts.supportsSugarOptions ?? false,
   });
-  return (p._id as mongoose.Types.ObjectId).toString();
+  const id = p.id;
+  prices.set(id, price);
+  if (opts.stock > 0) {
+    await receivePurchaseStock(
+      manager,
+      [{ productId: id, productName: name, quantity: opts.stock, trackExpiry: false }],
+      {},
+    );
+  }
+  return id;
+}
+
+function fullPayments(items: TestItem[]): Array<{ method: "CASH"; amount: number }> {
+  const total = items.reduce((s, i) => s + i.quantity * (prices.get(i.productId) ?? 0), 0);
+  return [{ method: "CASH", amount: total }];
 }
 
 let manager: Awaited<ReturnType<typeof buildAuthUser>>;
@@ -42,66 +68,98 @@ let cashier: Awaited<ReturnType<typeof buildAuthUser>>;
 let barista: Awaited<ReturnType<typeof buildAuthUser>>;
 let accountant: Awaited<ReturnType<typeof buildAuthUser>>;
 let productId: string;
+let sugarProductId: string;
 
-async function createOrder(actor = cashier) {
+async function createOrder(
+  actor = cashier,
+  overrides?: { items?: TestItem[]; note?: string },
+): Promise<ReturnType<typeof createCafeOrder> extends Promise<infer T> ? T : never> {
+  const items = overrides?.items ?? [{ productId, quantity: 2, notes: "بدون سكر" }];
   return createCafeOrder(actor, {
-    items: [{ productId, quantity: 2, notes: "بدون سكر" }],
-    note: "حليب إضافي",
+    items,
+    payments: fullPayments(items),
+    note: overrides?.note ?? "حليب إضافي",
     idempotencyKey: crypto.randomUUID(),
   });
 }
 
-describe("café orders & KDS (Phase 7)", () => {
+describe("café orders & KDS (Phase 7 + 7.1)", () => {
   beforeAll(async () => {
     await resetDb();
     manager = await freshActor("MANAGER");
     cashier = await freshActor("CASHIER");
     barista = await freshActor("BARISTA");
     accountant = await freshActor("ACCOUNTANT");
-    productId = await makeProduct("لاتيه", 35);
+    await openShift(cashier, { openingCash: 0 });
+    productId = await makeProduct("لاتيه", 35, { stock: 200 });
+    sugarProductId = await makeProduct("قهوة تركية", 25, { stock: 200, supportsSugarOptions: true });
   });
 
-  /* ---- Cashier create flow ---- */
+  /* ---- Cashier create flow (financial) ---- */
 
-  it("cashier creates an order; server snapshots price and derives totals/order number", async () => {
+  it("cashier creates an order; the Sale + invoice commit in the same transaction and stock decrements once", async () => {
+    const before = await getSellableStock(productId, false);
     const order = await createCafeOrder(cashier, {
       items: [{ productId, quantity: 2, notes: "بدون سكر" }],
+      payments: [{ method: "CASH", amount: 70 }],
       note: "حليب إضافي",
       idempotencyKey: crypto.randomUUID(),
     });
     expect(order.orderNumber).toMatch(/^CF-\d{8}-\d{4}$/);
     expect(order.status).toBe("NEW");
     expect(order.totalAmount).toBe(70); // 35 * 2
-    expect(order.items[0]).toMatchObject({ productName: "لاتيه", unitPrice: 35, quantity: 2, lineTotal: 70, notes: "بدون سكر" });
+    expect(order.saleId).toBeTruthy();
+    expect(order.invoiceNumber).toMatch(/^INV-/);
+    expect(order.invoiceNumber).not.toBe(order.orderNumber);
+    expect(order.items[0]).toMatchObject({
+      productName: "لاتيه",
+      unitPrice: 35,
+      quantity: 2,
+      lineTotal: 70,
+      notes: "بدون سكر",
+      sugarLevel: "",
+    });
     expect(order.note).toBe("حليب إضافي");
     expect(order.history.length).toBe(1);
     expect(order.history[0]?.status).toBe("NEW");
 
-    // No financial Sale is recorded — the order is operational only.
-    const orderDocs = await CafeOrderModel.find({ _id: order.id }).lean();
-    expect(orderDocs.length).toBe(1);
-    expect(orderDocs[0]?.status).toBe("NEW");
+    const after = await getSellableStock(productId, false);
+    expect(after.sellable).toBe(before.sellable - 2);
+
+    const saleDoc = await SaleModel.findById(order.saleId).lean();
+    expect(saleDoc).toBeTruthy();
+    if (saleDoc) {
+      expect(saleDoc.totalAmount).toBe(70);
+      expect(saleDoc.invoiceNumber).toBe(order.invoiceNumber);
+      expect(String(saleDoc.invoiceNumber).startsWith("INV-")).toBe(true);
+    }
   });
 
-  it("is idempotent: replaying the same key returns the existing order without a duplicate", async () => {
+  it("replays the same idempotency key: one café order and exactly one Sale (no double deduction)", async () => {
     const key = crypto.randomUUID();
     const first = await createCafeOrder(cashier, {
       items: [{ productId, quantity: 1 }],
+      payments: fullPayments([{ productId, quantity: 1 }]),
       idempotencyKey: key,
     });
     const second = await createCafeOrder(cashier, {
       items: [{ productId, quantity: 1 }],
+      payments: fullPayments([{ productId, quantity: 1 }]),
       idempotencyKey: key,
     });
     expect(second.id).toBe(first.id);
-    const count = await CafeOrderModel.countDocuments({ idempotencyKey: key });
-    expect(count).toBe(1);
+    expect(await CafeOrderModel.countDocuments({ idempotencyKey: key })).toBe(1);
+    expect(await SaleModel.countDocuments({ idempotencyKey: `cafe-sale:${key}` })).toBe(1);
   });
 
   it("rejects an empty order and an unknown product (VALIDATION / NOT_FOUND)", async () => {
     let caught: unknown;
     try {
-      await createCafeOrder(cashier, { items: [], idempotencyKey: crypto.randomUUID() });
+      await createCafeOrder(cashier, {
+        items: [],
+        payments: [{ method: "CASH", amount: 0 }],
+        idempotencyKey: crypto.randomUUID(),
+      });
     } catch (error) {
       caught = error;
     }
@@ -112,6 +170,7 @@ describe("café orders & KDS (Phase 7)", () => {
     try {
       await createCafeOrder(cashier, {
         items: [{ productId: new mongoose.Types.ObjectId().toString(), quantity: 1 }],
+        payments: fullPayments([{ productId: new mongoose.Types.ObjectId().toString(), quantity: 1 }]),
         idempotencyKey: crypto.randomUUID(),
       });
     } catch (error) {
@@ -119,6 +178,153 @@ describe("café orders & KDS (Phase 7)", () => {
     }
     expect(caught2).toBeInstanceOf(AppError);
     if (caught2 instanceof AppError) expect(caught2.code).toBe("NOT_FOUND");
+  });
+
+  /* ---- Sugar (Phase 7.1) ---- */
+
+  it("rejects selecting sugar for a product that does not support sugar options (rolls back: no order, no sale)", async () => {
+    const key = crypto.randomUUID();
+    let caught: unknown;
+    try {
+      await createCafeOrder(cashier, {
+        items: [{ productId, quantity: 1, sugarLevel: "STANDARD" }],
+        payments: fullPayments([{ productId, quantity: 1 }]),
+        idempotencyKey: key,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    if (caught instanceof AppError) expect(caught.code).toBe("VALIDATION");
+    expect(await CafeOrderModel.countDocuments({ idempotencyKey: key })).toBe(0);
+    expect(await SaleModel.countDocuments({ idempotencyKey: `cafe-sale:${key}` })).toBe(0);
+  });
+
+  it("rejects an unknown sugar level via the validation schema", async () => {
+    let caught: unknown;
+    try {
+      await createCafeOrder(cashier, {
+        items: [{ productId: sugarProductId, quantity: 1, sugarLevel: "NOPE" as CafeSugarLevel }],
+        payments: fullPayments([{ productId: sugarProductId, quantity: 1 }]),
+        idempotencyKey: crypto.randomUUID(),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    if (caught instanceof AppError) expect(caught.code).toBe("VALIDATION");
+  });
+
+  it("merges identical (product + sugar + customization) lines but keeps different sugar per-cup (per-cup rule)", async () => {
+    const order = await createCafeOrder(cashier, {
+      items: [
+        { productId: sugarProductId, quantity: 1, sugarLevel: "PLAIN", notes: "بدون سكر" },
+        { productId: sugarProductId, quantity: 2, sugarLevel: "PLAIN", notes: "بدون سكر" },
+        { productId: sugarProductId, quantity: 2, sugarLevel: "STANDARD" },
+        { productId: sugarProductId, quantity: 1, sugarLevel: "CARAMEL" },
+      ],
+      payments: fullPayments([
+        { productId: sugarProductId, quantity: 1 },
+        { productId: sugarProductId, quantity: 2 },
+        { productId: sugarProductId, quantity: 2 },
+        { productId: sugarProductId, quantity: 1 },
+      ]),
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Identical PLAIN lines merged to 3; STANDARD and CARAMEL stay separate.
+    expect(order.items.length).toBe(3);
+    expect(order.items.map((i) => i.sugarLevel)).toEqual(["PLAIN", "STANDARD", "CARAMEL"]);
+    expect(order.items.map((i) => i.quantity)).toEqual([3, 2, 1]);
+    expect(order.items[0]?.notes).toBe("بدون سكر");
+
+    const total = 3 * 25 + 2 * 25 + 1 * 25;
+    expect(order.totalAmount).toBe(total);
+    expect(order.items.reduce((s, i) => s + i.lineTotal, 0)).toBe(total);
+  });
+
+  /* ---- Payments & shift / inventory effects ---- */
+
+  it("requires payments to equal the total (VALIDATION), rolling back the whole transaction", async () => {
+    const key = crypto.randomUUID();
+    let caught: unknown;
+    try {
+      await createCafeOrder(cashier, {
+        items: [{ productId, quantity: 1 }],
+        payments: [{ method: "CASH", amount: 15 }], // price is 35
+        idempotencyKey: key,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    if (caught instanceof AppError) expect(caught.code).toBe("VALIDATION");
+    expect(await CafeOrderModel.countDocuments({ idempotencyKey: key })).toBe(0);
+    expect(await SaleModel.countDocuments({ idempotencyKey: `cafe-sale:${key}` })).toBe(0);
+  });
+
+  it("stores mixed payments on the Sale; only CASH raises the shift's expected cash", async () => {
+    const c = await freshActor("CASHIER");
+    const shift = await openShift(c, { openingCash: 500 });
+    const latte = await makeProduct("كابتشينو", 30, { stock: 50 });
+
+    const order = await createCafeOrder(c, {
+      items: [{ productId: latte, quantity: 2 }],
+      payments: [
+        { method: "CASH", amount: 30 },
+        { method: "VISA", amount: 30 },
+      ],
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    expect(order.totalAmount).toBe(60);
+    const saleDoc = await SaleModel.findById(order.saleId).lean<{
+      totalAmount: number;
+      payments: Array<{ method: string; amount: number }>;
+    }>();
+    expect(saleDoc).toBeTruthy();
+    if (saleDoc) {
+      expect(saleDoc.totalAmount).toBe(60);
+      expect(saleDoc.payments.reduce((s, p) => s + p.amount, 0)).toBe(60);
+      expect(saleDoc.payments.some((p) => p.method === "CASH" && p.amount === 30)).toBe(true);
+      expect(saleDoc.payments.some((p) => p.method === "VISA" && p.amount === 30)).toBe(true);
+    }
+    expect(await computeExpectedCash(shift.id)).toBe(530); // 500 + CASH(30); VISA excluded
+  });
+
+  it("rolls back the entire transaction on oversell (no order, no sale, stock untouched)", async () => {
+    const scarce = await makeProduct("قهوة سريعة", 20, { stock: 3 });
+    const c = await freshActor("CASHIER");
+    await openShift(c, { openingCash: 0 });
+
+    let caught: unknown;
+    try {
+      await createCafeOrder(c, {
+        items: [{ productId: scarce, quantity: 5 }],
+        payments: [{ method: "CASH", amount: 100 }],
+        idempotencyKey: crypto.randomUUID(),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    if (caught instanceof AppError) expect(caught.code).toBe("CONFLICT");
+
+    const stock = await getSellableStock(scarce, false);
+    expect(stock.sellable).toBe(3);
+  });
+
+  it("cancellation stays operational: the linked Sale is never reversed", async () => {
+    const order = await createOrder();
+    const cancelled = await transitionCafeOrder(cashier, order.id, "CANCELLED");
+    expect(cancelled.status).toBe("CANCELLED");
+
+    const saleDoc = await SaleModel.findById(order.saleId).lean<{ status?: string; totalAmount: number }>();
+    expect(saleDoc).toBeTruthy();
+    if (saleDoc) {
+      expect(saleDoc.totalAmount).toBe(70);
+      expect(saleDoc.status ?? "COMPLETED").toBe("COMPLETED");
+    }
   });
 
   /* ---- State machine ---- */
@@ -196,7 +402,7 @@ describe("café orders & KDS (Phase 7)", () => {
 
   /* ---- Authorization matrix ---- */
 
-  it("BARISTA can advance status but cannot create orders", async () => {
+  it("BARISTA can advance status but cannot create orders (no sales.create)", async () => {
     let caught: unknown;
     try {
       await createOrder(barista);
@@ -211,7 +417,7 @@ describe("café orders & KDS (Phase 7)", () => {
     expect(prep.status).toBe("PREPARING");
   });
 
-  it("BARISTA cannot cancel (distinct cancel permission) — only creators/authorized roles may", async () => {
+  it("BARISTA cannot cancel (distinct cancel permission)", async () => {
     const order = await createOrder();
     let caught: unknown;
     try {

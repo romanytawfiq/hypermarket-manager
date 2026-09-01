@@ -8,6 +8,8 @@ import { recordAudit } from "@/services/audit.service";
 import { nextSequenceValue } from "@/models/sequence";
 import { ProductModel } from "@/models/product";
 import { CustomerModel } from "@/models/customer";
+import { createSaleWithSession } from "@/services/sales.service";
+import type { CafeSugarLevel } from "@/lib/cafe/sugar";
 import {
   CafeOrderModel,
   CAFE_ORDER_STATUSES,
@@ -25,21 +27,30 @@ import {
 } from "@/lib/validations/cafe";
 
 /**
- * Café orders & Barista KDS core (Phase 7).
+ * Café orders & Barista KDS core (Phase 7 + 7.1).
  *
- * Business flow: a cashier creates an operational café order; a barista sees it
- * on the KDS board and advances it through the state machine
- * NEW → PREPARING → READY → COMPLETED (or CANCELLED via an allowed transition).
+ * Business flow: a cashier takes the order, collects payment, and records both
+ * the operational café order and its financial Sale in one MongoDB transaction.
+ * A barista then sees the order on the KDS board and advances it through the
+ * state machine NEW → PREPARING → READY → COMPLETED (or CANCELLED via an
+ * allowed transition).
  *
- * - `createOrder` snapshots product name/unit price for stability, computes all
+ * - `createOrder` records a structured sugar level per cup (split quantity
+ *   lines: two cups with different sugar are separate lines and are never
+ *   merged), snapshots product name/unit price for stability, computes all
  *   totals server-side, and is idempotent on `idempotencyKey`.
+ * - Financial integration reuses the existing retail Sale core
+ *   (`createSaleWithSession`): the Sale + payments + inventory + shift effect
+ *   commit inside the café order's own transaction, so `CafeOrder.totalAmount`
+ *   and `Sale.total` can never diverge (no second financial system). The order
+ *   carries a stable `saleId`/`invoiceNumber` link; the Sale is authoritative.
  * - `transitionOrder` is the single authoritative transition entry point. It
  *   validates the state machine, uses optimistic concurrency on `version`, and
  *   appends a business event to the transactional outbox so the KDS updates.
  *
- * Financial note (Phase 7 limitation): order creation is operational only — no
- * Sale / payment is recorded here. Payment integration for café orders is a
- * later concern and intentionally out of scope.
+ * Cancellation is operational: the state is advanced server-side but the
+ * linked Sale is never mutated (returns/refunds are not modeled yet). The order
+ * number (CF-…) and the sale invoice number (INV-…) are always kept distinct.
  */
 
 export interface CafeOrderItemDto {
@@ -48,6 +59,8 @@ export interface CafeOrderItemDto {
   unitPrice: number;
   quantity: number;
   lineTotal: number;
+  /** Structured per-cup sugar level snapshot; "" = not recorded / not applicable. */
+  sugarLevel: string;
   notes: string;
 }
 
@@ -65,6 +78,10 @@ export interface CafeOrderDto {
   status: CafeOrderStatus;
   customerId: string | null;
   customerName: string;
+  /** Stable link to the authoritative Sale record ("" when not linked). */
+  saleId: string | null;
+  /** Snapshot of the Sale invoice number (INV-…) for display. */
+  invoiceNumber: string;
   note: string;
   version: number;
   history: CafeHistoryEntryDto[];
@@ -85,12 +102,13 @@ export interface CafeEventDto {
 /** Status identifier re-exported for the actions layer. */
 export type CafeOrderStatusDto = CafeOrderStatus;
 
-/** Café product search result (id + name + price for the order builder). */
+/** Café product search result (id + name + price + sugar capability for the order builder). */
 export interface CafeProductSearchDto {
   id: string;
   name: string;
   unit: string;
   sellingPrice: number;
+  supportsSugarOptions: boolean;
 }
 
 /** Customer search result for optional café order association. */
@@ -114,6 +132,7 @@ function toCafeOrderDto(o: CafeOrderDocument): CafeOrderDto {
     unitPrice: i.unitPrice,
     quantity: i.quantity,
     lineTotal: i.lineTotal,
+    sugarLevel: i.sugarLevel ?? "",
     notes: i.notes ?? "",
   }));
   const now = Date.now();
@@ -126,6 +145,8 @@ function toCafeOrderDto(o: CafeOrderDocument): CafeOrderDto {
     status: o.status,
     customerId: o.customerId ? o.customerId.toString() : null,
     customerName: o.customerName ?? "",
+    saleId: o.saleId ?? null,
+    invoiceNumber: o.invoiceNumber ?? "",
     note: o.note ?? "",
     version: o.version ?? 0,
     history: (o.statusHistory ?? []).map((h) => ({
@@ -201,25 +222,33 @@ async function appendEvents(
 
 /* ---- Create ---- */
 
-interface ResolvedItem {
+interface ResolvedLine {
   productId: mongoose.Types.ObjectId;
   productName: string;
   unitPrice: number;
   quantity: number;
-  notes?: string;
   lineTotal: number;
+  sugarLevel?: CafeSugarLevel;
+  notes?: string;
 }
 
 /**
- * Creates an operational café order. Requires `cafe.orders.create`.
- * Server loads products, snapshots name/price, and computes totals; the client
- * only supplies product ids, quantities, and notes.
+ * Creates a café order AND its financial Sale inside one transaction.
+ * Requires `cafe.orders.create` + `sales.create`.
+ *
+ * Per-cup sugar rule: two cups of the same product with different sugar (or
+ * customization) are separate order lines; identical (product + sugar + notes)
+ * lines are merged. The server validates that each product supports the
+ * selected sugar level, derives every price/total from the Product catalog via
+ * the existing Sale core, and only CASH payments affect the shift's expected
+ * cash. On any failure the whole transaction rolls back — no order, no sale,
+ * no stock movement (atomic boundary).
  */
 export async function createCafeOrder(
   actor: AuthUser | null,
   input: CafeOrderCreateInput,
 ): Promise<CafeOrderDto> {
-  const authed = requirePermission(actor, "cafe.orders.create");
+  const authed = requirePermission(actor, ["cafe.orders.create", "sales.create"]);
   await dbConnect();
   input = parseOrThrow(cafeOrderCreateSchema, input);
 
@@ -231,49 +260,79 @@ export async function createCafeOrder(
       if (existing) return toCafeOrderDto(existing);
     }
 
-    // Resolve products server-side.
-    const items: ResolvedItem[] = [];
-    const seen = new Set<string>();
+    // Merge identical (product + sugar + customization) lines. Different sugar
+    // produces separate cup lines — never merged.
+    const merged: Array<{
+      productId: string;
+      quantity: number;
+      sugarLevel?: CafeSugarLevel;
+      notes?: string;
+    }> = [];
+    const byKey = new Map<string, number>();
     for (const line of input.items) {
-      if (seen.has(line.productId)) {
-        throw new AppError("VALIDATION", "يوجد صنف مكرر في الطلب");
+      const key = `${line.productId}|${line.sugarLevel ?? ""}|${line.notes?.trim() ?? ""}`;
+      const idx = byKey.get(key);
+      if (idx !== undefined) {
+        merged[idx]!.quantity += Math.round(line.quantity);
+      } else {
+        byKey.set(key, merged.length);
+        merged.push({
+          productId: line.productId,
+          quantity: Math.round(line.quantity),
+          sugarLevel: line.sugarLevel,
+          notes: line.notes?.trim() || undefined,
+        });
       }
-      seen.add(line.productId);
+    }
+
+    // Café-specific rule: the product must support the selected sugar level.
+    for (const line of merged) {
       const product = await ProductModel.findById(line.productId)
         .session(session)
-        .select("name sellingPrice active")
-        .lean<{ _id: mongoose.Types.ObjectId; name: string; sellingPrice: number; active: boolean }>();
+        .select("name supportsSugarOptions active")
+        .lean<{ _id: mongoose.Types.ObjectId; name: string; supportsSugarOptions: boolean; active: boolean }>();
       if (!product || !product.active) {
         throw new AppError("NOT_FOUND", "أحد الأصناف غير موجود أو غير نشط");
       }
-      const quantity = Math.round(line.quantity);
-      const unitPrice = Math.round(product.sellingPrice * 100) / 100;
-      items.push({
-        productId: product._id,
-        productName: product.name,
-        unitPrice,
-        quantity,
-        notes: line.notes ?? "",
-        lineTotal: Math.round(unitPrice * quantity * 100) / 100,
-      });
-    }
-
-    // Optional customer association (validation only; no financial posting).
-    let customerId: mongoose.Types.ObjectId | undefined;
-    let customerName = "";
-    if (input.customerId) {
-      const customer = await CustomerModel.findById(input.customerId)
-        .session(session)
-        .select("name active")
-        .lean<{ _id: mongoose.Types.ObjectId; name: string; active: boolean }>();
-      if (!customer || !customer.active) {
-        throw new AppError("NOT_FOUND", "العميل غير موجود أو غير نشط");
+      if (line.sugarLevel && !product.supportsSugarOptions) {
+        throw new AppError(
+          "VALIDATION",
+          `المنتج '${product.name}' لا يدعم اختيار درجة السكر`,
+        );
       }
-      customerId = customer._id;
-      customerName = customer.name;
     }
 
-    const totalAmount = Math.round(items.reduce((s, i) => s + i.lineTotal, 0) * 100) / 100;
+    // Record the authoritative Sale (prices, totals, payments, inventory,
+    // shift, customer snapshot + ledger) inside THIS transaction.
+    const sale = await createSaleWithSession(
+      authed,
+      {
+        items: merged.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        payments: input.payments,
+        idempotencyKey: `cafe-sale:${input.idempotencyKey}`,
+        customerId: input.customerId,
+        cashTendered: input.cashTendered,
+      },
+      session,
+    );
+
+    // Snapshot the café items from the authoritative sale lines so the order
+    // total can never diverge from Sale.total.
+    const items: ResolvedLine[] = sale.items.map((saleItem, idx) => {
+      const line = merged[idx]!;
+      return {
+        productId: saleItem.product,
+        productName: saleItem.productName,
+        unitPrice: saleItem.unitPrice,
+        quantity: saleItem.quantity,
+        lineTotal: saleItem.lineTotal,
+        sugarLevel: line.sugarLevel,
+        notes: line.notes ?? "",
+      };
+    });
+    const totalAmount = sale.totalAmount;
+    const customerId = sale.customer?.id ? new mongoose.Types.ObjectId(sale.customer.id) : undefined;
+    const customerName = sale.customer?.name ?? "";
 
     const now = new Date();
     const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
@@ -290,6 +349,7 @@ export async function createCafeOrder(
             unitPrice: i.unitPrice,
             quantity: i.quantity,
             lineTotal: i.lineTotal,
+            sugarLevel: i.sugarLevel,
             notes: i.notes,
           })),
           totalAmount,
@@ -304,6 +364,8 @@ export async function createCafeOrder(
           ],
           customerId,
           customerName,
+          saleId: sale._id.toString(),
+          invoiceNumber: sale.invoiceNumber,
           note: input.note ?? "",
           createdBy: { id: authed.id, username: authed.username },
           idempotencyKey: input.idempotencyKey,
@@ -328,7 +390,13 @@ export async function createCafeOrder(
       action: "cafe_order.created",
       entity: "cafe_order",
       entityId: order._id.toString(),
-      after: { orderNumber, status: "NEW", totalAmount },
+      after: {
+        orderNumber,
+        status: "NEW",
+        totalAmount,
+        saleId: sale._id.toString(),
+        invoiceNumber: sale.invoiceNumber,
+      },
     });
 
     return toCafeOrderDto(order);
@@ -493,12 +561,13 @@ export async function cafeSearchProducts(
   const rows = await ProductModel.find({ active: true, $or: [{ name: { $regex: re } }, { sku: { $regex: re } }, { barcode: { $regex: re } }] })
     .sort({ name: 1 })
     .limit(30)
-    .lean<Array<{ _id: mongoose.Types.ObjectId; name: string; unit: string; sellingPrice: number }>>();
+    .lean<Array<{ _id: mongoose.Types.ObjectId; name: string; unit: string; sellingPrice: number; supportsSugarOptions: boolean }>>();
   return rows.map((p) => ({
     id: p._id.toString(),
     name: p.name,
     unit: p.unit,
     sellingPrice: p.sellingPrice,
+    supportsSugarOptions: p.supportsSugarOptions,
   }));
 }
 

@@ -559,6 +559,14 @@ Baristas must be able to update order status.
 
 The system must preserve order history.
 
+## REQ-CAFE-007 (Phase 7.1)
+
+Creating a café order records the customer's payment: a Sale (with its payments), the stock deduction, and the cashier-shift effect commit in the **same transaction** as the order. Full payment is required (no on-account). The order carries the linked `saleId` and the Sale `invoiceNumber`.
+
+## REQ-CAFE-008 (Phase 7.1)
+
+Sugar belongs to the **individual cup**: supported products expose a structured sugar level per cup, and cups with different sugar levels are always distinct order lines (never merged). Products that do not advertise sugar options reject a sugar selection.
+
 ---
 
 # 20. Café Order States

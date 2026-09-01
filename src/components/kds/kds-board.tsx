@@ -15,6 +15,7 @@ import {
   formatAge,
   formatShortTime,
 } from "@/lib/cafe/format";
+import { sugarLabel } from "@/lib/cafe/sugar";
 import type { CafeOrderDto, CafeOrderStatusDto } from "@/services/cafe.service";
 
 const COLUMNS: { status: CafeOrderStatusDto; title: string; hint: string }[] = [
@@ -32,6 +33,7 @@ export function KdsBoard({
 }) {
   const [orders, setOrders] = useState(initialOrders);
   const [now, setNow] = useState(() => Date.now());
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   // Tick every second so age timers stay live.
@@ -60,8 +62,10 @@ export function KdsBoard({
   const connection = realtime.status;
 
   const advance = (orderId: string, status: CafeOrderStatusDto) => {
+    setPendingOrderId(orderId);
     startTransition(async () => {
       const res = await transitionCafeOrderAction({ orderId, targetStatus: status });
+      setPendingOrderId(null);
       if (res.order) {
         toast.success(`تم: ${CAFE_STATUS_LABELS[res.order.status]}`);
       } else if (res.error) {
@@ -128,7 +132,7 @@ export function KdsBoard({
                       now={now}
                       onAdvance={advance}
                       canCancel={canCancel && (o.status === "NEW" || o.status === "PREPARING")}
-                      pending={pending}
+                      busy={pendingOrderId === o.id}
                     />
                   ))}
                 </div>
@@ -160,13 +164,13 @@ function OrderCard({
   now,
   onAdvance,
   canCancel,
-  pending,
+  busy,
 }: {
   order: CafeOrderDto;
   now: number;
   onAdvance: (id: string, status: CafeOrderStatusDto) => void;
   canCancel: boolean;
-  pending: boolean;
+  busy: boolean;
 }) {
   const ageSeconds = Math.max(0, Math.floor((now - new Date(order.createdAt).getTime()) / 1000));
   const nextAction =
@@ -206,6 +210,11 @@ function OrderCard({
             <span className="text-lg font-semibold">
               <span className="ms-1 text-xl font-black tabular-nums">{it.quantity}×</span>
               {it.productName}
+              {it.sugarLevel ? (
+                <Badge variant="outline" className="ms-2 align-middle text-xs font-semibold">
+                  {sugarLabel(it.sugarLevel)}
+                </Badge>
+              ) : null}
             </span>
             {it.notes ? <span className="text-xs text-muted-foreground">{it.notes}</span> : null}
           </li>
@@ -220,13 +229,13 @@ function OrderCard({
         <div className="mt-3 flex gap-2">
           <Button
             className="h-12 flex-1 text-base"
-            disabled={pending}
+            disabled={busy}
             onClick={() => onAdvance(order.id, nextAction.status)}
           >
             {nextAction.label}
           </Button>
           {canCancel ? (
-            <Button variant="ghost" className="h-12" disabled={pending} onClick={() => onAdvance(order.id, "CANCELLED")} aria-label="إلغاء الطلب">
+            <Button variant="ghost" className="h-12" disabled={busy} onClick={() => onAdvance(order.id, "CANCELLED")} aria-label="إلغاء الطلب">
               إلغاء
             </Button>
           ) : null}

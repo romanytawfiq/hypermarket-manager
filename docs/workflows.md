@@ -390,23 +390,32 @@ Apply Financial/Inventory Effects if Required
 
 ---
 
-# 13b. Café / KDS — Phase 7 (finalized)
+# 13b. Café / KDS — Phase 7 + 7.1 (finalized)
 
-## Café order creation (cashier)
+## Café order creation (cashier) — checkout posts the financial Sale
 
 ```text
-Cashier (cafe.orders.create)
+Cashier (cafe.orders.create + sales.create)
 ↓
 Search active products / optional customer
 ↓
-Add line items (qty, per-line note) + order note
+Add per-cup lines: quantity, sugar level (per cup; chips only for sugar-capable products),
+  per-line note, order note — different sugar/customization stays a separate cup line
 ↓
-Submit (idempotencyKey)  →  server derives prices + order number CF-YYYYMMDD-NNNN
+Collect payment at checkout (full payment; optional cash tendered for the chance)
 ↓
-Snapshot items; status = NEW; append CAFE_ORDER_CREATED to outbox (same tx)
+Submit (idempotencyKey) → server, in ONE MongoDB transaction:
+   1. merges identical (product + sugar + customization) lines
+   2. validates sugar-support + catalog/stock (same rules as POS)
+   3. records the authoritative Sale (payments, shift effect, inventory, customer snapshot)
+   4. snapshots café items/total from that Sale; links saleId + invoiceNumber (INV-…)
+   5. order number CF-YYYYMMDD-NNNN; status = NEW
+   6. append CAFE_ORDER_CREATED to outbox (same tx)
 ↓
-Optional customer association (name/phone search)
+On any failure the whole transaction rolls back (no order, no Sale, no stock, no shift effect)
 ```
+
+BARISTA cannot create orders (no `sales.create`). Cancelling an order is operational: the linked Sale stays untouched (returns/refunds not modeled).
 
 ## KDS board (barista)
 
@@ -424,7 +433,7 @@ Advance (cafe.orders.status): بدء التحضير → جاهز → تم الت
 Cancel (cafe.orders.cancel only) → CANCELLED
 ```
 
-The state machine is server-enforced: `NEW→PREPARING`, `NEW→CANCELLED`, `PREPARING→READY`, `PREPARING→CANCELLED`, `READY→COMPLETED`; terminal states reject all further transitions and step-skipping is rejected. Every transition is a version-guarded transaction that appends an outbox event.
+The state machine is server-enforced: `NEW→PREPARING`, `NEW→CANCELLED`, `PREPARING→READY`, `PREPARING→CANCELLED`, `READY→COMPLETED`; terminal states reject all further transitions and step-skipping is rejected. Every transition is a version-guarded transaction that appends an outbox event. Order-action buttons busy-lock only their own order, never the whole board.
 
 ## Reconnect / reconcile
 
