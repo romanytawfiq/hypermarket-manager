@@ -103,6 +103,13 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "cash_movements.read",
     "cash_movements.create",
     "receipts.print",
+    // Café Orders & Barista KDS (Phase 7)
+    "cafe.orders.read",
+    "cafe.orders.create",
+    "cafe.orders.update",
+    "cafe.orders.cancel",
+    "cafe.orders.status",
+    "cafe.kds.view",
   ],
   WAREHOUSE_EMPLOYEE: [
     "products.read",
@@ -172,8 +179,19 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "customers.credit",
     "customer_payments.read",
     "customer_payments.create",
+    // Café Orders & Barista KDS (Phase 7) — cashier creates orders
+    "cafe.orders.read",
+    "cafe.orders.create",
+    "cafe.orders.update",
+    "cafe.orders.cancel",
   ],
-  BARISTA: [],
+  BARISTA: [
+    // Café / Barista KDS minimum (Phase 7) — view board + advance status only.
+    // No accounting, suppliers, inventory adjustments, or user management.
+    "cafe.orders.read",
+    "cafe.orders.status",
+    "cafe.kds.view",
+  ],
 };
 
 /** Default permission ids for a role. */

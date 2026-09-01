@@ -599,6 +599,41 @@ Gross profit = sales revenue − COGS (from sale-item cost snapshots). Net profi
 
 ---
 
+# 20c. Cafe Orders & Barista KDS (Phase 7)
+
+## BR-067 - Cafe Order Is Operational in Phase 7
+
+A cafe order is an **operational** workflow object, not a financial transaction, in Phase 7. It records the order lines, status, and cashier/barista progression but records **no payment and no Sale**, and performs **no inventory or recipe deduction**. This is a documented limitation: payment/checkout and cafe ingredient inventory integration are deferred (known limitations). No second payment system was introduced.
+
+## BR-068 - Server-Authoritative State Machine
+
+The cafe lifecycle is enforced server-side. Canonical states: NEW, PREPARING, READY, COMPLETED, CANCELLED. Allowed transitions: NEW to PREPARING, NEW to CANCELLED, PREPARING to READY, PREPARING to CANCELLED, READY to COMPLETED. Terminal states (COMPLETED, CANCELLED) reject every further transition including self-transitions; step-skipping (e.g. NEW to READY, PREPARING to COMPLETED) is rejected. The transition history is embedded on the order for audit and idempotency (BR-001).
+
+## BR-069 - Optimistic Concurrency + Idempotent Submit
+
+Every cafe mutation runs in a MongoDB transaction and is version-guarded (findOneAndUpdate filter on the current version); a mismatch yields a CONFLICT and is rejected. A unique, sparse idempotencyKey protects cashier double-submission of the same order; duplicate submits return the existing order rather than creating a second one.
+
+## BR-070 - Prices Derived Server-Side
+
+Order item prices and line totals are computed server-side from the catalog product at creation and snapshotted into the order. Client-provided prices, quantities, and totals are never trusted (BR-001). Product search for the cafe builder is active-only.
+
+## BR-071 - Cafe Permissions Are Role-Gated
+
+Cafe permission identifiers: cafe.orders.read, cafe.orders.create, cafe.orders.update, cafe.orders.cancel, cafe.orders.status, cafe.kds.view.
+
+- BARISTA receives only cafe.orders.read, cafe.orders.status, cafe.kds.view - no create/cancel/accounting/inventory/supplier/user.
+- CASHIER receives read/create/update/cancel but **not** cafe.orders.status or cafe.kds.view.
+- MANAGER receives all six.
+- OWNER holds all (via its full permissions array).
+
+Cancel requires the dedicated cafe.orders.cancel; every other status transition requires cafe.orders.status. All cafe reads require a cafe read permission.
+
+## BR-072 - Realtime Outbox + SSE
+
+Cafe business events are written to a transactional outbox in the same transaction as the domain change (CAFE_ORDER_CREATED, CAFE_ORDER_STATUS_CHANGED). Each event carries a unique eventId (dedup) and a monotonic sequence (resume). The KDS consumes an SSE stream, resumes from after / Last-Event-ID, dedupes by eventId, and reconciles against full server state (listKdsOrders) on (re)connect so a missed batch is never silently lost (BR-001 server authority).
+
+---
+
 # 21. Business Decisions Still Required
 
 The following rules must be explicitly decided before implementation of the relevant features.
@@ -614,7 +649,8 @@ The following rules must be explicitly decided before implementation of the rele
 | VAT                   | Required / Not required                   | Financial calculations           | Pending |
 | Shift expense         | Allowed / Separate workflow               | Cash reconciliation              | **Resolved (Phase 6):** Expenses are first-class financial transactions. A cash expense linked to an OPEN shift produces an EXPENSE cash movement so the shift's expected cash accounts for it; a closed shift is never mutated. |
 | Multiple open shifts  | Allowed / Not allowed                     | Shift constraints                | Pending |
-| Café ingredients      | Track / Do not track                      | Inventory model                  | Pending |
+| Café ingredients      | Track / Do not track                      | Inventory model                  | **Pending (deferred):** Phase 7 is operational only; no recipe/ingredient inventory deduction is performed. Open decision for a later phase. |
+| Café order payment    | At checkout / On completion / Deferred    | Payment + Sale integration       | **Pending (deferred):** Phase 7 records no Payment / Sale for a café order. No second payment system added. |
 | Online payment        | Supported / Not supported                 | Order state                      | Pending |
 | Cash on delivery      | Supported / Not supported                 | Delivery + payment               | Pending |
 | Delivery fee          | Fixed / Distance / Area / Manual          | Order pricing                    | Pending |

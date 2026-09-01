@@ -359,7 +359,7 @@ Satisfies the requirement that new orders appear with minimal delay, that status
 - A broker (e.g., Redis pub/sub, Pusher, Socket.io) is revisited only if multi-branch KDS distribution is required.
 
 ### Impact
-Provides near-real-time barista UX with robust reconnect and deduplication behavior.
+Provides near-real-time barista UX with robust reconnect and deduplication behavior. **Implemented in Phase 7** (see the "Café / KDS (finalized)" roadmap section): transactional outbox + SSE resume by monotonic sequence, dedupe by `eventId`, full-state reconcile on reconnect.
 
 ---
 
@@ -582,7 +582,7 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 | **4 — POS, Payments & Cashier Shifts** | The core money path | 0–3 | POS screen; mixed payments; credit sales; returns/refunds; shift open/close; cash movements; variance; basic receipt. |
 | **5 — Customer Credit & Receivables** | Customer accounts, credit, collections | 0–4 | Customer; customer ledger; credit limits/approval; payment UI; balance reporting. |
 | **6 — Expenses & Accounting** | Expenses and accounting overview | 0–5 | Expense model + categories; consolidated accounting screens. ✅ **Implemented** |
-| **7 — Café / KDS** | Café orders + barista board | 0, 2 | CafeOrder state machine + history; cashier creation; barista board; SSE/outbox realtime; reconnect/reconcile. |
+| **7 — Café / KDS** | Café orders + barista board | 0, 2 | CafeOrder state machine + history; cashier creation; barista board; SSE/outbox realtime; reconnect/reconcile. ✅ **Implemented** |
 | **8 — Printing** | Production thermal receipts | 0–7 | 58/80mm layouts; receipt models; preview; later ESC/POS. |
 | **9 — Online Store & Delivery** | Public store + fulfillment | 0–2, prior | Online catalog view; search; product pages; cart; checkout; online order lifecycle; reservation; delivery statuses; online payments / COD; tracking; cancellation/refund. |
 | **10 — Reports & Audit** | Complete reporting + auditability | all business | Daily/weekly/monthly/yearly reports; product/category/payment/cashier/supplier/customer/expense/inventory/expiry/profit; audit UI; optional summary collections. |
@@ -634,3 +634,14 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 - **Loading:** Route-level `loading.tsx` provides structural skeletons matching the final layout; server component streams immediately.
 - **RTL/Accessibility:** Arabic-first labels, logical CSS properties, heading hierarchy (h1 → h2), visible focus states, color not sole status indicator.
 - **No generic AI patterns:** Avoids huge rounded cards, excessive gradients, glassmorphism, meaningless animations, decorative blobs.
+
+### Café / KDS (finalized)
+
+- **Goal:** a separate operational café workflow (cashier creates, barista fulfils) on the same catalog domain, with server-authoritative realtime via a transactional outbox + SSE. Payment/checkout and recipe inventory are intentionally deferred (Known Limitations — no second payment system).
+- **Models:** `CafeOrder` (embedded immutable `items`, `statusHistory`, optimistic `version`, unique sparse `idempotencyKey`, indexed by `{status, createdAt}` and `{createdAt:-1}`) and `EventOutbox` (unique `eventId`, monotonic unique `sequence`, `version`). Order numbers `CF-YYYYMMDD-NNNN` via a per-day sequence.
+- **State machine:** server-enforced guard `NEW→PREPARING`, `NEW→CANCELLED`, `PREPARING→READY`, `PREPARING→CANCELLED`, `READY→COMPLETED`; terminal states reject all further transitions and step-skipping is rejected. Every mutation is a transactional, version-guarded update that appends an outbox event in the same transaction; double-submission is protected by `idempotencyKey`, and optimistic mismatch yields `CONFLICT`.
+- **Realtime (§15):** route `/api/cafe/events` (`runtime = "nodejs"`, `dynamic = "force-dynamic"`) authenticates independently of middleware, validates café read permissions, and streams a `snapshot` (SNAPSHOT_SEQUENCE = current latest) followed by `cafe:event` deltas with `id = sequence` and 15s heartbeat, polling the outbox every 1.5s. Resume honors `Last-Event-ID` (auto-sent by EventSource) over the `after` query param; events are deduped by `eventId` server/client-side.
+- **Reconnect:** the KDS reconciles by refetching full server state (`listKdsOrders`) and resumes by monotonic `sequence`, so no batch is lost and duplicates never double-apply.
+- **Permissions:** `cafe.orders.read/create/update/cancel/status` + `cafe.kds.view`. BARISTA = read/status/kds.view only; CASHIER = read/create/update/cancel (no `status`, no `kds.view`); MANAGER/OWNER = all. Routes `/cafe` and `/kds` gate on the relevant permission and redirect otherwise; all actions/services enforce at the boundary via `requirePermission`.
+- **UI:** cashier café screen (`/cafe`) with active-orders grid + history toggle + builder modal (product search, quantity, per-line and order notes, optional customer, idempotent submit, live refresh). KDS board (`/kds`) with 3 columns (جديد / قيد التحضير / جاهز), large order short-code + 1s age timer, big touch targets read from meters away, calm empty states, non-intrusive connection badge, realtime refresh/reconcile. Barista UI stays free of accounting details.
+- **Financial boundary:** café order creation is operational only — no Sale, no Payment, no inventory change (documented limitation). Prices/line totals derived server-side and snapshotted.

@@ -81,6 +81,12 @@ const PERMISSION_LABELS: Record<PermissionId, { label: string; scope: string; de
   "reports.view": { label: "عرض التقارير", scope: "reports", description: "عرض التقارير التشغيلية" },
   "settings.view": { label: "عرض الإعدادات", scope: "settings", description: "عرض إعدادات النظام" },
   "settings.manage": { label: "إدارة الإعدادات", scope: "settings", description: "تعديل إعدادات النظام" },
+  "cafe.orders.read": { label: "عرض طلبات الكافيه", scope: "cafe", description: "عرض طلبات الكافيه وتفاصيلها" },
+  "cafe.orders.create": { label: "إنشاء طلب كافيه", scope: "cafe", description: "إنشاء طلب كافيه جديد من الكاشير" },
+  "cafe.orders.update": { label: "تعديل طلب كافيه", scope: "cafe", description: "تعديل بيانات طلب الكافيه" },
+  "cafe.orders.cancel": { label: "إلغاء طلب كافيه", scope: "cafe", description: "إلغاء طلب كافيه" },
+  "cafe.orders.status": { label: "تغيير حالة طلب الكافيه", scope: "cafe", description: "تغيير حالة طلب الكافيه (تحضير / جاهز / تسليم)" },
+  "cafe.kds.view": { label: "عرض شاشة الباريستا", scope: "cafe", description: "عرض شاشة الباريستا وسير العمل" },
 };
 
 /** Creates any missing Permission documents from the catalog. */

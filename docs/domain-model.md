@@ -427,46 +427,64 @@ When an expense is `CASH` and linked to an OPEN shift, an `EXPENSE` `CashMovemen
 
 ## CafeOrder
 
-Represents a café order.
+Represents a café order created by a cashier and fulfilled by a barista.
 
-Potential information:
+Persisted shape (`src/models/cafe-order.ts`):
 
-- order number
-- cashier
-- customer where relevant
-- items
-- status
-- timestamps
+- `orderNumber` — business number `CF-YYYYMMDD-NNNN` (per-day sequence).
+- `status` — lifecycle state (see §15 below).
+- `items` — immutable snapshot of ordered lines.
+- `note` + per-line `notes` — order-level and line-level free-text notes (no modifiers in Phase 7).
+- `customerId` — optional customer association (attached, never required).
+- `statusHistory` — embedded transition history (from → to, by, at) for audit and idempotency.
+- `version` — optimistic-concurrency counter (BSON pattern for atomic transitions).
+- `idempotencyKey` — unique, sparse; guards duplicate cashier submissions.
+- `createdAt` / `updatedAt`.
+
+A café order is **operational only** in Phase 7: it carries no Payment array and does not create a Sale or inventory movement. Financial checkout and ingredient inventory are deferred (see business rules and Known Limitations).
 
 ## CafeOrderItem
 
-Represents an item inside a café order.
+Represents a line inside a café order — a product snapshot for price history.
 
-Possible information:
+- `productId` — reference to the catalog product (price/total are derived server-side at creation and snapshotted).
+- `productName`, `unitPrice`, `quantity`, `lineTotal` — frozen at creation.
+- `notes` — per-line note.
 
-- product/menu item
-- quantity
-- notes
-- modifiers
-- price
+## EventOutbox (Café realtime)
+
+Drives the realtime SSE stream (`src/models/event-outbox.ts`). Append-only café business events written in the same MongoDB transaction as the domain change:
+
+- `eventId` — unique idempotency id for consumer dedup.
+- `type` — `CAFE_ORDER_CREATED` | `CAFE_ORDER_STATUS_CHANGED`.
+- `aggregateId` — the CafeOrder `_id`.
+- `version` — the order's version at event time.
+- `sequence` — unique, monotonic scalar the client uses to resume / dedupe.
+- `payload` — event data (orderId, orderNumber, status, from/to).
+- `processedAt` — consumer consumption marker (TTL cleanup).
 
 ---
 
 # 15. Café Workflow Domain
 
-The order lifecycle is a state machine.
-
-Initial conceptual states:
+The order lifecycle is a server-authoritative state machine.
 
 ```text
-NEW
-PREPARING
-READY
-COMPLETED
-CANCELLED
+NEW ──────────────► PREPARING ──────────► READY ───────► COMPLETED
+ │                     │                    │
+ └────► CANCELLED ◄────┘                    └─(terminal)
 ```
 
-The exact transition rules belong to business rules.
+Localized labels are presentation-only; the machine uses the canonical identifiers.
+
+- Allowed transitions: `NEW→PREPARING`, `NEW→CANCELLED`, `PREPARING→READY`, `PREPARING→CANCELLED`, `READY→COMPLETED`.
+- Rejected (strategy-pattern guard `assertTransition`): terminal states (`COMPLETED`, `CANCELLED`) reject every further transition incl. self-transitions; step-skipping (e.g. `NEW→READY`, `PREPARING→COMPLETED`) is rejected.
+- Every mutation is transactional, version-guarded optimistic concurrency, and appends an outbox event in the same transaction.
+- Cancellation is a distinct permission-checked transition, not a deletion; the historical record is preserved.
+
+## Café realtime semantics
+
+The outbox + SSE design (see architecture §15, §15b): the server is authoritative, the client is a subscriber. Reconnects resume by the monotonic `sequence` (`after` / `Last-Event-ID`) and dedupe by `eventId`, then reconcile against full server state via `listKdsOrders` so a missed batch is never left behind.
 
 ---
 
@@ -637,8 +655,9 @@ MongoDB persistence must be designed based on:
 Before final schema design, investigate:
 
 - stock reservation for online orders
-- café ingredient inventory
-- shared inventory between café and retail
+- caf�? ingredient inventory
+- shared inventory between caf�? and retail
+- caf�? order payment / checkout integration (deferred in Phase 7)
 - customer credit limit
 - supplier credit limit
 - tax model

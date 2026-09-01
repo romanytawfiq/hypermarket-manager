@@ -91,6 +91,14 @@ export const PERMISSIONS = [
 
   "settings.view",
   "settings.manage",
+
+  // Café Orders & Barista KDS (Phase 7)
+  "cafe.orders.read",
+  "cafe.orders.create",
+  "cafe.orders.update",
+  "cafe.orders.cancel",
+  "cafe.orders.status",
+  "cafe.kds.view",
 ] as const;
 
 export type PermissionId = (typeof PERMISSIONS)[number];

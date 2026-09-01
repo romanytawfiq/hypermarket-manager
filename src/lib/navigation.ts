@@ -1,6 +1,8 @@
 import {
   BoxesIcon,
   CalculatorIcon,
+  ChefHatIcon,
+  CoffeeIcon,
   ContactIcon,
   HandCoinsIcon,
   LayoutDashboardIcon,
@@ -49,6 +51,8 @@ export type NavigationIcon =
   | "customers"
   | "expenses"
   | "accounting"
+  | "cafe"
+  | "kds"
   | "users";
 
 /** Latest set of icons used by navigation; rendered by the client and server. */
@@ -69,6 +73,8 @@ export const iconMap: Record<NavigationIcon, LucideIcon> = {
   customers: ContactIcon,
   expenses: HandCoinsIcon,
   accounting: CalculatorIcon,
+  cafe: CoffeeIcon,
+  kds: ChefHatIcon,
   users: UsersIcon,
 };
 
@@ -103,6 +109,9 @@ export const NAV_ITEMS: NavItem[] = [
   // Expenses & Accounting (Phase 6)
   { href: "/expenses", label: "المصروفات", icon: "expenses", permission: "expenses.read" },
   { href: "/accounting", label: "المحاسبة", icon: "accounting", permission: "accounting.read" },
+  // Café Orders & Barista KDS (Phase 7)
+  { href: "/cafe", label: "الكافيه", icon: "cafe", permission: "cafe.orders.read" },
+  { href: "/kds", label: "شاشة الباريستا", icon: "kds", permission: "cafe.kds.view" },
   // Admin
   { href: "/users", label: "المستخدمون", icon: "users", permission: "users.read" },
 ];

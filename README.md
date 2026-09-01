@@ -6,7 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 6 Complete + Dashboard Overview**
+> **Status: Phase 7 Complete (Café / KDS)**
+> Phases 0–6 plus the Dashboard Overview redesign and the POS camera barcode scanner are complete, and now **Phase 7 — Café Orders & Barista KDS** is implemented: cashier café-order creation, a barista Kitchen Display System, and server-authoritative realtime via a transactional outbox + SSE. See [Development Status](#development-status).
 > Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). The Dashboard Overview redesign (role-aware business analytics, KPIs, sales trends, inventory alerts, financial summaries) and the POS **camera barcode scanner** are complete. See [Development Status](#development-status).
 
 ---
@@ -234,7 +235,7 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-Phases 0–6 are implemented and the test suite passes (96 tests across 13 files). The Dashboard Overview redesign is complete.
+Phases 0–7 are implemented and the test suite passes (137 tests across 18 files). The Dashboard Overview redesign is complete.
 
 | Phase | Status |
 |-------|--------|
@@ -246,7 +247,7 @@ Phases 0–6 are implemented and the test suite passes (96 tests across 13 files
 | **5 — Customer Credit & Receivables** | ✅ Complete |
 | **6 — Expenses & Accounting** | ✅ Complete |
 | **Dashboard Overview** | ✅ Complete |
-| **7 — Café / KDS** | Planned |
+| **7 — Café / KDS** | ✅ Complete |
 | **8 — Printing** | Planned |
 | **9 — Online Store & Delivery** | Planned |
 | **10 — Reports & Audit** | Planned |
@@ -273,6 +274,10 @@ Customer management, credit sales, customer ledger (source of truth for balances
 ### Phase 6 — Expenses & Accounting (Implemented)
 
 Configurable expense categories and an expenses log (`EXP-YYYYMMDD-NNNN`, idempotency-protected). A cash expense linked to an OPEN shift records an `EXPENSE` cash movement so shift reconciliation accounts for it. An accounting overview aggregates the real persisted transactions (no second ledger): sales total/collected/count + payment-method breakdown, purchases, expenses, gross & net profit (preliminary), current receivables/payables, and physical cash flow (cash strictly separated from card/wallet/Instapay). Access gated by `expenses.*` / `accounting.read` permissions.
+
+### Phase 7 — Café / KDS (Implemented)
+
+Cashier café-order creation (product search, line/order notes, optional customer, idempotent submit) and a barista **Kitchen Display System** (`/kds`) with a three-column board (جديد / قيد التحضير / جاهز), large touch actions, and a live 1-second age timer. The server is authoritative: a server-enforced state machine (`NEW → PREPARING → READY → COMPLETED`, plus permission-checked `CANCELLED`) with optimistic concurrency, and realtime delivery through a transactional outbox + SSE that resumes by monotonic sequence and dedupes by `eventId`, reconciling full server state on reconnect. Café permissions are role-gated (`cafe.orders.*` / `cafe.kds.view`); the cashier and barista UIs stay operational-only in this phase — no Sale, payment, or inventory deduction (documented limitation).
 
 The phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
 
@@ -311,4 +316,4 @@ skipped entirely in production. Re-running `npm run seed` verifies the existing
 Owner's password hash and re-hashes it if the stored value cannot be verified,
 so a corrupted/plaintext hash is repaired automatically.
 
-> The application is Arabic-first and RTL. Phases 0–6 are implemented; the foundation, identity/RBAC, catalog/inventory, suppliers/purchasing, POS & shifts, customer credit, and expenses & accounting features are functional.
+> The application is Arabic-first and RTL. Phases 0–7 are implemented; the foundation, identity/RBAC, catalog/inventory, suppliers/purchasing, POS & shifts, customer credit, expenses & accounting, and café orders / barista KDS features are functional.

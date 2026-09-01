@@ -390,6 +390,48 @@ Apply Financial/Inventory Effects if Required
 
 ---
 
+# 13b. Café / KDS — Phase 7 (finalized)
+
+## Café order creation (cashier)
+
+```text
+Cashier (cafe.orders.create)
+↓
+Search active products / optional customer
+↓
+Add line items (qty, per-line note) + order note
+↓
+Submit (idempotencyKey)  →  server derives prices + order number CF-YYYYMMDD-NNNN
+↓
+Snapshot items; status = NEW; append CAFE_ORDER_CREATED to outbox (same tx)
+↓
+Optional customer association (name/phone search)
+```
+
+## KDS board (barista)
+
+```text
+Barista (cafe.kds.view) opens /kds
+↓
+List active orders (oldest first) from server  [authoritative]
+↓
+Connect SSE /api/cafe/events (resume after / Last-Event-ID, dedupe by eventId)
+↓
+Live deltas: CAFE_ORDER_CREATED → board; CAFE_ORDER_STATUS_CHANGED → move column
+↓
+Advance (cafe.orders.status): بدء التحضير → جاهز → تم التسليم
+↓
+Cancel (cafe.orders.cancel only) → CANCELLED
+```
+
+The state machine is server-enforced: `NEW→PREPARING`, `NEW→CANCELLED`, `PREPARING→READY`, `PREPARING→CANCELLED`, `READY→COMPLETED`; terminal states reject all further transitions and step-skipping is rejected. Every transition is a version-guarded transaction that appends an outbox event.
+
+## Reconnect / reconcile
+
+On (re)connect the KDS refetches full server state via `listKdsOrders`, dedupes by `eventId`, and resumes by monotonic `sequence`, so a missed batch is never left behind and duplicate events never create duplicate operations.
+
+---
+
 # 15. Online Order Workflow
 
 ```text
