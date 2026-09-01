@@ -521,7 +521,7 @@ function CategoryManager({ initial, onChanged }: { initial: ExpenseCategoryDto[]
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              add();
+              if (!createPending) add();
             }
           }}
         />

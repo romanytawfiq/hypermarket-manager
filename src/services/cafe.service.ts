@@ -285,16 +285,25 @@ export async function createCafeOrder(
       }
     }
 
-    // Café-specific rule: the product must support the selected sugar level.
+    // Café-specific rule: the product's CATEGORY must support the selected
+    // sugar level. Sugar capability is a category-level configuration, so a
+    // product inherits it from its category (never a per-product flag).
     for (const line of merged) {
       const product = await ProductModel.findById(line.productId)
         .session(session)
-        .select("name supportsSugarOptions active")
-        .lean<{ _id: mongoose.Types.ObjectId; name: string; supportsSugarOptions: boolean; active: boolean }>();
+        .populate({ path: "category", select: "supportsSugarOptions" })
+        .select("name active")
+        .lean<{
+          _id: mongoose.Types.ObjectId;
+          name: string;
+          active: boolean;
+          category: { supportsSugarOptions: boolean } | null;
+        }>();
       if (!product || !product.active) {
         throw new AppError("NOT_FOUND", "أحد الأصناف غير موجود أو غير نشط");
       }
-      if (line.sugarLevel && !product.supportsSugarOptions) {
+      const categorySupportsSugar = product.category?.supportsSugarOptions ?? false;
+      if (line.sugarLevel && !categorySupportsSugar) {
         throw new AppError(
           "VALIDATION",
           `المنتج '${product.name}' لا يدعم اختيار درجة السكر`,
@@ -559,15 +568,24 @@ export async function cafeSearchProducts(
   if (!q) return [];
   const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
   const rows = await ProductModel.find({ active: true, $or: [{ name: { $regex: re } }, { sku: { $regex: re } }, { barcode: { $regex: re } }] })
+    .populate({ path: "category", select: "supportsSugarOptions" })
     .sort({ name: 1 })
     .limit(30)
-    .lean<Array<{ _id: mongoose.Types.ObjectId; name: string; unit: string; sellingPrice: number; supportsSugarOptions: boolean }>>();
+    .lean<
+      Array<{
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        unit: string;
+        sellingPrice: number;
+        category: { supportsSugarOptions: boolean } | null;
+      }>
+    >();
   return rows.map((p) => ({
     id: p._id.toString(),
     name: p.name,
     unit: p.unit,
     sellingPrice: p.sellingPrice,
-    supportsSugarOptions: p.supportsSugarOptions,
+    supportsSugarOptions: p.category?.supportsSugarOptions ?? false,
   }));
 }
 

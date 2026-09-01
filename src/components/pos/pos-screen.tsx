@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CameraIcon,
   CheckIcon,
+  Loader2Icon,
   LockIcon,
   MinusIcon,
   PlusIcon,
@@ -92,6 +93,8 @@ export function PosScreen({
   const [actualCash, setActualCash] = useState("");
   const [closeNote, setCloseNote] = useState("");
   const [closeResult, setCloseResult] = useState<ShiftDto | null>(null);
+  const [openShiftPending, setOpenShiftPending] = useState(false);
+  const [closeShiftPending, setCloseShiftPending] = useState(false);
 
   const searchWrapperRef = useRef<HTMLDivElement>(null);
   const customerWrapperRef = useRef<HTMLDivElement>(null);
@@ -366,39 +369,50 @@ export function PosScreen({
   };
 
   const handleOpenShift = async () => {
+    if (openShiftPending) return;
     setError(null);
-    const result = await openShiftAction({ openingCash: Number(openingCash) || 0 });
-    if (result.success) {
-      setShowOpenShift(false);
-      setOpeningCash("");
-      toast.success("تم فتح الوردية بنجاح");
-      await refreshShift();
-    } else if (result.error) {
-      setError(result.error);
-      toast.error(result.error);
+    setOpenShiftPending(true);
+    try {
+      const result = await openShiftAction({ openingCash: Number(openingCash) || 0 });
+      if (result.success) {
+        setShowOpenShift(false);
+        setOpeningCash("");
+        toast.success("تم فتح الوردية بنجاح");
+        await refreshShift();
+      } else if (result.error) {
+        setError(result.error);
+        toast.error(result.error);
+      }
+    } finally {
+      setOpenShiftPending(false);
     }
   };
 
   const handleCloseShift = async () => {
-    if (!shift) return;
+    if (!shift || closeShiftPending) return;
     setError(null);
-    const result = await closeShiftAction(shift.id, {
-      actualCash: Number(actualCash) || 0,
-      note: closeNote,
-    });
-    if (result.success) {
-      setShowCloseShift(false);
-      setActualCash("");
-      setCloseNote("");
-      toast.success("تم إغلاق الوردية بنجاح");
-      const active = await getActiveShiftAction();
-      setShift(active);
-      const closed = await listShiftsAction();
-      const found = closed.find((s) => s.id === shift.id);
-      if (found) setCloseResult(found);
-    } else if (result.error) {
-      setError(result.error);
-      toast.error(result.error);
+    setCloseShiftPending(true);
+    try {
+      const result = await closeShiftAction(shift.id, {
+        actualCash: Number(actualCash) || 0,
+        note: closeNote,
+      });
+      if (result.success) {
+        setShowCloseShift(false);
+        setActualCash("");
+        setCloseNote("");
+        toast.success("تم إغلاق الوردية بنجاح");
+        const active = await getActiveShiftAction();
+        setShift(active);
+        const closed = await listShiftsAction();
+        const found = closed.find((s) => s.id === shift.id);
+        if (found) setCloseResult(found);
+      } else if (result.error) {
+        setError(result.error);
+        toast.error(result.error);
+      }
+    } finally {
+      setCloseShiftPending(false);
     }
   };
 
@@ -746,7 +760,10 @@ export function PosScreen({
               disabled={!canSubmit}
               onClick={submitSale}
             >
-              إتمام الدفع
+              {submitting ? (
+                <Loader2Icon className="size-4 animate-spin" aria-hidden />
+              ) : null}
+              {submitting ? "جارٍ إتمام البيع..." : "إتمام الدفع"}
             </Button>
 
             {!shift ? (
@@ -767,8 +784,9 @@ export function PosScreen({
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <label className="text-sm">المبلغ الافتتاحي</label>
+              <label className="text-sm" htmlFor="opening-cash">المبلغ الافتتاحي</label>
               <Input
+                id="opening-cash"
                 type="number"
                 min={0}
                 value={openingCash}
@@ -776,9 +794,9 @@ export function PosScreen({
                 placeholder="0"
               />
             </div>
-            <Button onClick={handleOpenShift}>
-              <LockIcon className="size-4" aria-hidden />
-              فتح الوردية
+            <Button onClick={handleOpenShift} disabled={openShiftPending}>
+              {openShiftPending ? <Loader2Icon className="size-4 animate-spin" aria-hidden /> : <LockIcon className="size-4" aria-hidden />}
+              {openShiftPending ? "جارٍ فتح الوردية..." : "فتح الوردية"}
             </Button>
           </div>
         </DialogContent>
@@ -792,8 +810,9 @@ export function PosScreen({
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <label className="text-sm">المبلغ الفعلي</label>
+              <label className="text-sm" htmlFor="actual-cash">المبلغ الفعلي</label>
               <Input
+                id="actual-cash"
                 type="number"
                 min={0}
                 value={actualCash}
@@ -802,15 +821,17 @@ export function PosScreen({
               />
             </div>
             <div className="grid gap-2">
-              <label className="text-sm">ملاحظة (اختياري)</label>
+              <label className="text-sm" htmlFor="close-note">ملاحظة (اختياري)</label>
               <Input
+                id="close-note"
                 value={closeNote}
                 onChange={(e) => setCloseNote(e.target.value)}
                 placeholder="ملاحظة"
               />
             </div>
-            <Button variant="destructive" onClick={handleCloseShift}>
-              إغلاق الوردية
+            <Button variant="destructive" onClick={handleCloseShift} disabled={closeShiftPending}>
+              {closeShiftPending ? <Loader2Icon className="size-4 animate-spin" aria-hidden /> : null}
+              {closeShiftPending ? "جارٍ إغلاق الوردية..." : "إغلاق الوردية"}
             </Button>
           </div>
         </DialogContent>

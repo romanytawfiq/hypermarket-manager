@@ -622,10 +622,10 @@ Sugar belongs to the individual cup, not to the product line. Canonical levels (
 
 Rules:
 
-- A product advertises `supportsSugarOptions`; selecting a sugar for a product that does not support it is rejected server-side (VALIDATION) and nothing is recorded.
+- Sugar capability is configured at the **category** level (`Category.supportsSugarOptions`); every product derives it from its category — there is no per-product sugar flag for new behavior. Selecting a sugar for a product whose category does not advertise it is rejected server-side (VALIDATION) and nothing is recorded. A legacy product-level flag exists only for backward compatibility and is ignored.
 - Two cups of the same product with **different** sugar (or customization) are always **separate order lines** and are never merged. Identical (product + sugar + customization) lines are merged into a single line with summed quantity.
 - In the order builder, changing the sugar of a line with quantity > 1 splits exactly one cup off with the new sugar; the rest keep their previous sugar (client-side helper + integration round-trip are both unit-tested).
-- The sugar value is snapshotted per line on the order; legacy orders without a recorded sugar remain valid (optional field, no fabricated value).
+- The sugar value is snapshotted per line on the order; legacy orders without a recorded sugar remain valid (optional field, no fabricated value), and **historical orders are never rewritten** when a category's sugar setting changes (Phase 7.1 → category-based).
 
 ## BR-068 - Server-Authoritative State Machine
 

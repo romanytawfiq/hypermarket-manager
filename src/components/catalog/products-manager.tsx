@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  Loader2Icon,
   MoreHorizontalIcon,
   PackageIcon,
   PencilIcon,
@@ -77,6 +78,8 @@ export function ProductsManager({
   const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [disableTarget, setDisableTarget] = useState<ProductDto | null>(null);
+  const [disablePending, startDisableTransition] = useTransition();
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -92,7 +95,22 @@ export function ProductsManager({
 
   const refresh = () => {
     setDialog(null);
+    setDisableTarget(null);
     router.refresh();
+  };
+
+  const confirmDisable = () => {
+    if (!disableTarget) return;
+    const target = disableTarget;
+    startDisableTransition(async () => {
+      const result = await setProductActiveAction(target.id, !target.active);
+      if (result.success) {
+        toast.success(target.active ? "تم تعطيل المنتج" : "تم تفعيل المنتج");
+        refresh();
+      } else if (result.error) {
+        toast.error(result.error);
+      }
+    });
   };
 
   return (
@@ -190,7 +208,7 @@ export function ProductsManager({
                   canUpdate={canUpdate}
                   canDisable={canDisable}
                   onEdit={() => setDialog({ kind: "edit", product })}
-                  onChanged={refresh}
+                  onDisableRequest={(p) => setDisableTarget(p)}
                 />
               ))
             )}
@@ -251,6 +269,30 @@ export function ProductsManager({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={disableTarget !== null} onOpenChange={(open) => !open && setDisableTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {disableTarget?.active ? "تعطيل المنتج" : "تفعيل المنتج"}
+            </DialogTitle>
+            <DialogDescription>
+              {disableTarget?.active
+                ? `سيصبح المنتج "${disableTarget?.name}" غير متاح للبيع في نقاط البيع والمتجر. يمكنك تفعيله لاحقًا في أي وقت.`
+                : `سيصبح المنتج "${disableTarget?.name}" متاحًا للبيع مرة أخرى.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDisableTarget(null)} disabled={disablePending}>
+              إلغاء
+            </Button>
+            <Button variant={disableTarget?.active ? "destructive" : "default"} onClick={confirmDisable} disabled={disablePending}>
+              {disablePending ? <Loader2Icon className="size-4 animate-spin" aria-hidden /> : null}
+              {disableTarget?.active ? "تعطيل المنتج" : "تفعيل المنتج"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -260,28 +302,14 @@ function ProductRow({
   canUpdate,
   canDisable,
   onEdit,
-  onChanged,
+  onDisableRequest,
 }: {
   product: ProductDto;
   canUpdate: boolean;
   canDisable: boolean;
   onEdit: () => void;
-  onChanged: () => void;
+  onDisableRequest: (product: ProductDto) => void;
 }) {
-  const [pending, startTransition] = useTransition();
-
-  const toggleActive = () => {
-    startTransition(async () => {
-      const result = await setProductActiveAction(product.id, !product.active);
-      if (result.success) {
-        toast.success(product.active ? "تم تعطيل المنتج" : "تم تفعيل المنتج");
-        onChanged();
-      } else if (result.error) {
-        toast.error(result.error);
-      }
-    });
-  };
-
   const low = product.sellable !== null && product.sellable <= product.minimumStock;
   const out = product.sellable !== null && product.sellable <= 0;
 
@@ -335,13 +363,13 @@ function ProductRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {canUpdate ? (
-              <DropdownMenuItem onSelect={onEdit}>
+              <DropdownMenuItem onClick={onEdit}>
                 <PencilIcon className="size-4" aria-hidden />
                 تعديل
               </DropdownMenuItem>
             ) : null}
             {canDisable ? (
-              <DropdownMenuItem onSelect={toggleActive} disabled={pending}>
+              <DropdownMenuItem onClick={() => onDisableRequest(product)}>
                 {product.active ? (
                   <>
                     <ShieldOffIcon className="size-4" aria-hidden />

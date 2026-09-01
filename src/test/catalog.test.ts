@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   createCategory,
+  updateCategory,
+  listCategories,
   createBrand,
   createProduct,
   updateProduct,
@@ -213,5 +215,88 @@ describe("catalog / products", () => {
     });
     const stock = await getSellableStock(p.id, false);
     expect(stock.sellable).toBe(0);
+  });
+});
+
+describe("category café sugar configuration (Phase 7.1 → category-based)", () => {
+  let manager: Awaited<ReturnType<typeof buildAuthUser>>;
+
+  beforeAll(async () => {
+    await resetDb();
+    manager = await managerActor();
+  });
+
+  it("defaults a new category to supportsSugarOptions = false", async () => {
+    const cat = await createCategory(manager, { name: "سكر افتراضي" });
+    expect(cat.supportsSugarOptions).toBe(false);
+  });
+
+  it("creates a category with sugar capability enabled and lists it back", async () => {
+    const cat = await createCategory(manager, { name: "مشروبات ساخنة", supportsSugarOptions: true });
+    expect(cat.supportsSugarOptions).toBe(true);
+
+    const cats = await listCategories(manager);
+    const found = cats.find((c) => c.id === cat.id);
+    expect(found?.supportsSugarOptions).toBe(true);
+  });
+
+  it("toggles sugar capability on an existing category", async () => {
+    const cat = await createCategory(manager, { name: "عصائر", supportsSugarOptions: false });
+    expect(cat.supportsSugarOptions).toBe(false);
+    const enabled = await updateCategory(manager, cat.id, { name: "عصائر", supportsSugarOptions: true });
+    expect(enabled.supportsSugarOptions).toBe(true);
+    const disabled = await updateCategory(manager, cat.id, { name: "عصائر", supportsSugarOptions: false });
+    expect(disabled.supportsSugarOptions).toBe(false);
+  });
+
+  it("derives a product's sugar capability from its category (create + read)", async () => {
+    const sugarCat = await createCategory(manager, { name: "قهوة المعاينة", supportsSugarOptions: true });
+    const plainCat = await createCategory(manager, { name: "معجنات المعاينة", supportsSugarOptions: false });
+
+    const sugarProduct = await createProduct(manager, {
+      name: "قهوة معاينة",
+      categoryId: sugarCat.id,
+      unit: "كوب",
+      purchaseCost: 5,
+      sellingPrice: 10,
+      minimumStock: 0,
+    });
+    const plainProduct = await createProduct(manager, {
+      name: "معجنات معاينة",
+      categoryId: plainCat.id,
+      unit: "قطعة",
+      purchaseCost: 3,
+      sellingPrice: 7,
+      minimumStock: 0,
+    });
+
+    expect(sugarProduct.supportsSugarOptions).toBe(true);
+    expect(plainProduct.supportsSugarOptions).toBe(false);
+
+    const fetchedSugar = await getProduct(manager, sugarProduct.id);
+    const fetchedPlain = await getProduct(manager, plainProduct.id);
+    expect(fetchedSugar.supportsSugarOptions).toBe(true);
+    expect(fetchedPlain.supportsSugarOptions).toBe(false);
+
+    const listed = await listProducts(manager, { status: "all", page: 1, pageSize: 50 });
+    expect(listed.items.find((i) => i.id === sugarProduct.id)?.supportsSugarOptions).toBe(true);
+    expect(listed.items.find((i) => i.id === plainProduct.id)?.supportsSugarOptions).toBe(false);
+  });
+
+  it("a product's capability follows its category when the category is updated", async () => {
+    const cat = await createCategory(manager, { name: "مؤقتة للمتابعة", supportsSugarOptions: false });
+    const p = await createProduct(manager, {
+      name: "منتج يتبع الفئة",
+      categoryId: cat.id,
+      unit: "قطعة",
+      purchaseCost: 1,
+      sellingPrice: 2,
+      minimumStock: 0,
+    });
+    expect(p.supportsSugarOptions).toBe(false);
+
+    await updateCategory(manager, cat.id, { name: "مؤقتة للمتابعة", supportsSugarOptions: true });
+    const refetched = await getProduct(manager, p.id);
+    expect(refetched.supportsSugarOptions).toBe(true);
   });
 });

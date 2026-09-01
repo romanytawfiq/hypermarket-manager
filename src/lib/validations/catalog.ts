@@ -11,6 +11,8 @@ import { z } from "zod";
 export const categorySchema = z.object({
   name: z.string().trim().min(1, "أدخل اسم الفئة").max(120, "اسم الفئة طويل جدًا"),
   active: z.boolean().optional(),
+  /** Category-level café sugar capability: products in this category offer a structured sugar picker. */
+  supportsSugarOptions: z.boolean().optional(),
 });
 
 export type CategoryInput = z.infer<typeof categorySchema>;
@@ -41,7 +43,6 @@ export const productCreateSchema = z.object({
   sellingPrice: z.coerce.number().min(0, "سعر البيع يجب ألا يكون سالبًا"),
   minimumStock: z.coerce.number().int().min(0, "الحد الأدنى يجب ألا يكون سالبًا"),
   trackExpiry: z.boolean().optional(),
-  supportsSugarOptions: z.boolean().optional(),
   onlineVisible: z.boolean().optional(),
   description: z.string().trim().max(2000, "الوصف طويل جدًا").optional(),
   active: z.boolean().optional(),
@@ -61,7 +62,6 @@ export const productUpdateSchema = z
     sellingPrice: z.coerce.number().min(0, "سعر البيع يجب ألا يكون سالبًا").optional(),
     minimumStock: z.coerce.number().int().min(0).optional(),
     trackExpiry: z.boolean().optional(),
-    supportsSugarOptions: z.boolean().optional(),
     onlineVisible: z.boolean().optional(),
     description: z.string().trim().max(2000).optional(),
     active: z.boolean().optional(),

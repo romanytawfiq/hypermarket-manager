@@ -77,6 +77,7 @@ Implemented fields:
 
 - `name` — unique, trimmed, indexed
 - `active` — boolean (default `true`); deactivation preserves the record and keeps historical product references intact
+- `supportsSugarOptions` — boolean (default `false`); **single source of truth** for café per-cup sugar capability. Every product in the category inherits this setting from the category, so a barista-facing sugar picker is offered exactly when the category advertises it. Products never carry their own sugar flag for new behavior.
 
 ## Brand
 
@@ -103,7 +104,7 @@ Implemented fields:
 - `sellingPrice` — current catalog selling price; min 0
 - `minimumStock` — integer low-stock threshold (default 0)
 - `trackExpiry` — boolean; enables batch/expiry tracking (default `false`)
-- `supportsSugarOptions` — boolean (default `false`); advertising that the café order builder offers a structured per-cup sugar level for this product (Phase 7.1). Selectable/settable when listing products; validation rejects a sugar choice for products without it.
+- `supportsSugarOptions` — **legacy, backward-compat only** (default `false`). Was the original per-product sugar capability flag. It is no longer the source of truth: sugar capability is derived from the product's `Category.supportsSugarOptions`. The field is preserved on existing documents so they persist unchanged and is never read or written for new behavior.
 - `onlineVisible` — boolean; whether the product appears in the online store (default `false`)
 - `description` — optional text
 - `active` — boolean (default `true`); deactivated products are hidden from normal selection but historical documents continue referencing them (BR-004)

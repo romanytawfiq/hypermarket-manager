@@ -204,13 +204,13 @@ function UserRow({
             <MoreHorizontalIcon className="size-4" aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onEdit}>
+            <DropdownMenuItem onClick={onEdit}>
               <PencilIcon className="size-4" aria-hidden />
               تعديل
             </DropdownMenuItem>
             {user.isOwner ? null : (
               <DropdownMenuItem
-                onSelect={() => {
+                onClick={() => {
                   if (!user.active || !isCurrentUser) toggleActive();
                 }}
                 disabled={isCurrentUser || pendingAction}

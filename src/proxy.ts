@@ -4,16 +4,16 @@ import { sessionCookieName } from "@/lib/auth/session";
 /**
  * Route protection (lightweight).
  *
- * This middleware performs a fast, Edge-safe check that a session cookie is
+ * This proxy performs a fast, Edge-safe check that a session cookie is
  * present and redirects anonymous visitors to the Arabic login page. It is a
  * UX/perf gate ONLY — the secure boundary is the (dashboard) layout + Server
  * Action + service authorization, which validate the session against the
- * database server-side. Never rely on this middleware alone.
+ * database server-side. Never rely on this proxy alone.
  */
 
 const PUBLIC_PREFIXES = ["/login", "/api", "/_next"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isPublic = PUBLIC_PREFIXES.some(

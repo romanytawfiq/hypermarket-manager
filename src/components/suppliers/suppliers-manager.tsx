@@ -188,13 +188,13 @@ export function SuppliersManager({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {canUpdate ? (
-                              <DropdownMenuItem onSelect={() => setDialog({ kind: "edit", item: s })}>
+                              <DropdownMenuItem onClick={() => setDialog({ kind: "edit", item: s })}>
                                 <PencilIcon className="size-4" aria-hidden />
                                 تعديل
                               </DropdownMenuItem>
                             ) : null}
                             {canDisable ? (
-                              <DropdownMenuItem onSelect={() => toggleActive(s)} disabled={togglePending}>
+                              <DropdownMenuItem onClick={() => toggleActive(s)} disabled={togglePending}>
                                 <Trash2Icon className="size-4" aria-hidden />
                                 {s.active ? "تعطيل" : "تفعيل"}
                               </DropdownMenuItem>

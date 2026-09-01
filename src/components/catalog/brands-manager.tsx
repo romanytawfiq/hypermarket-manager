@@ -165,12 +165,12 @@ function BrandRow({
               <MoreHorizontalIcon className="size-4" aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onEdit}>
+              <DropdownMenuItem onClick={onEdit}>
                 <PencilIcon className="size-4" aria-hidden />
                 تعديل
               </DropdownMenuItem>
               {item.active ? (
-                <DropdownMenuItem onSelect={deactivate} disabled={pending}>
+                <DropdownMenuItem onClick={deactivate} disabled={pending}>
                   <Trash2Icon className="size-4" aria-hidden />
                   تعطيل
                 </DropdownMenuItem>

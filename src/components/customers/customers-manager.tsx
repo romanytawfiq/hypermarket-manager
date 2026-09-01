@@ -188,13 +188,13 @@ export function CustomersManager({
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {canUpdate ? (
-                              <DropdownMenuItem onSelect={() => setDialog({ kind: "edit", item: c })}>
+                              <DropdownMenuItem onClick={() => setDialog({ kind: "edit", item: c })}>
                                 <PencilIcon className="size-4" aria-hidden />
                                 تعديل
                               </DropdownMenuItem>
                             ) : null}
                             {canDisable ? (
-                              <DropdownMenuItem onSelect={() => toggleActive(c)} disabled={togglePending}>
+                              <DropdownMenuItem onClick={() => toggleActive(c)} disabled={togglePending}>
                                 <Trash2Icon className="size-4" aria-hidden />
                                 {c.active ? "تعطيل" : "تفعيل"}
                               </DropdownMenuItem>

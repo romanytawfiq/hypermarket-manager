@@ -6,6 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export const metadata: Metadata = {
   title: "تسجيل الدخول — نكسا ريتيل",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default async function LoginPage({

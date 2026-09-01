@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import type { CategoryDto } from "@/services/catalog.service";
 import {
@@ -165,12 +166,12 @@ function CategoryRow({
               <MoreHorizontalIcon className="size-4" aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={onEdit}>
+              <DropdownMenuItem onClick={onEdit}>
                 <PencilIcon className="size-4" aria-hidden />
                 تعديل
               </DropdownMenuItem>
               {item.active ? (
-                <DropdownMenuItem onSelect={deactivate} disabled={pending}>
+                <DropdownMenuItem onClick={deactivate} disabled={pending}>
                   <Trash2Icon className="size-4" aria-hidden />
                   تعطيل
                 </DropdownMenuItem>
@@ -185,13 +186,14 @@ function CategoryRow({
 
 function CategoryForm({ item, onSuccess }: { item?: CategoryDto; onSuccess: () => void }) {
   const [name, setName] = useState(item?.name ?? "");
+  const [supportsSugarOptions, setSupportsSugarOptions] = useState(item?.supportsSugarOptions ?? false);
   const [actionError, setActionError] = useState<string>();
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
     setActionError(undefined);
     startTransition(async () => {
-      const input = { name };
+      const input = { name, supportsSugarOptions };
       const result = item
         ? await updateCategoryAction(item.id, input)
         : await createCategoryAction(input);
@@ -225,6 +227,21 @@ function CategoryForm({ item, onSuccess }: { item?: CategoryDto; onSuccess: () =
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="مثال: مشروبات"
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-input px-3 py-2">
+        <div className="grid gap-0.5">
+          <Label htmlFor="category-sugar" className="cursor-pointer">
+            خيارات السكر
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            السماح باختيار درجة السكر للمنتجات التابعة لهذه الفئة
+          </p>
+        </div>
+        <Switch
+          id="category-sugar"
+          checked={supportsSugarOptions}
+          onCheckedChange={setSupportsSugarOptions}
         />
       </div>
       <div className="flex justify-end gap-2 pt-1">

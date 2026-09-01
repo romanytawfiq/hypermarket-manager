@@ -29,6 +29,8 @@ export interface CategoryDto {
   id: string;
   name: string;
   active: boolean;
+  /** Products in this category derive café sugar capability from this setting. */
+  supportsSugarOptions: boolean;
   productCount: number;
 }
 
@@ -84,6 +86,7 @@ export async function listCategories(
     id: c._id.toString(),
     name: c.name,
     active: c.active,
+    supportsSugarOptions: c.supportsSugarOptions ?? false,
     productCount: countMap.get(c._id.toString()) ?? 0,
   }));
 }
@@ -95,16 +98,26 @@ export async function createCategory(actor: AuthUser | null, input: CategoryInpu
   if (await CategoryModel.exists({ name: input.name })) {
     throw new AppError("CONFLICT", "توجد فئة بنفس الاسم بالفعل");
   }
-  const category = await CategoryModel.create({ name: input.name, active: input.active ?? true });
+  const category = await CategoryModel.create({
+    name: input.name,
+    active: input.active ?? true,
+    supportsSugarOptions: input.supportsSugarOptions ?? false,
+  });
   await recordAudit({
     actorId: authed.id,
     actorUsername: authed.username,
     action: "category.created",
     entity: "category",
     entityId: category._id.toString(),
-    after: { name: category.name, active: category.active },
+    after: { name: category.name, active: category.active, supportsSugarOptions: category.supportsSugarOptions },
   });
-  return { id: category._id.toString(), name: category.name, active: category.active, productCount: 0 };
+  return {
+    id: category._id.toString(),
+    name: category.name,
+    active: category.active,
+    supportsSugarOptions: category.supportsSugarOptions ?? false,
+    productCount: 0,
+  };
 }
 
 /** Updates a category. Requires `categories.manage`. */
@@ -116,9 +129,10 @@ export async function updateCategory(actor: AuthUser | null, id: string, input: 
   if (input.name !== category.name && (await CategoryModel.exists({ name: input.name }))) {
     throw new AppError("CONFLICT", "توجد فئة بنفس الاسم بالفعل");
   }
-  const before = { name: category.name, active: category.active };
+  const before = { name: category.name, active: category.active, supportsSugarOptions: category.supportsSugarOptions };
   category.name = input.name;
   if (input.active !== undefined) category.active = input.active;
+  if (input.supportsSugarOptions !== undefined) category.supportsSugarOptions = input.supportsSugarOptions;
   await category.save();
   await recordAudit({
     actorId: authed.id,
@@ -127,10 +141,16 @@ export async function updateCategory(actor: AuthUser | null, id: string, input: 
     entity: "category",
     entityId: category._id.toString(),
     before,
-    after: { name: category.name, active: category.active },
+    after: { name: category.name, active: category.active, supportsSugarOptions: category.supportsSugarOptions },
   });
   const productCount = await ProductModel.countDocuments({ category: category._id });
-  return { id: category._id.toString(), name: category.name, active: category.active, productCount };
+  return {
+    id: category._id.toString(),
+    name: category.name,
+    active: category.active,
+    supportsSugarOptions: category.supportsSugarOptions ?? false,
+    productCount,
+  };
 }
 
 /** Deactivates a category (keeps record). Requires `categories.manage`. */
@@ -148,7 +168,13 @@ export async function deactivateCategory(actor: AuthUser | null, id: string): Pr
     entity: "category",
     entityId: category._id.toString(),
   });
-  return { id: category._id.toString(), name: category.name, active: false, productCount: 0 };
+  return {
+    id: category._id.toString(),
+    name: category.name,
+    active: false,
+    supportsSugarOptions: category.supportsSugarOptions ?? false,
+    productCount: 0,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -256,8 +282,16 @@ async function assertUniqueIdentifiers(
   }
 }
 
-async function loadCategory(categoryId: string): Promise<{ _id: mongoose.Types.ObjectId; name: string }> {
-  const category = await CategoryModel.findById(categoryId).lean<{ _id: mongoose.Types.ObjectId; name: string }>();
+interface ResolvedCategory {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  supportsSugarOptions: boolean;
+}
+
+async function loadCategory(
+  categoryId: string,
+): Promise<ResolvedCategory> {
+  const category = await CategoryModel.findById(categoryId).lean<ResolvedCategory>();
   if (!category) throw new AppError("NOT_FOUND", "الفئة غير موجودة");
   return category;
 }
@@ -288,7 +322,6 @@ export async function createProduct(actor: AuthUser | null, input: ProductCreate
     sellingPrice: input.sellingPrice,
     minimumStock: input.minimumStock,
     trackExpiry: input.trackExpiry ?? false,
-    supportsSugarOptions: input.supportsSugarOptions ?? false,
     onlineVisible: input.onlineVisible ?? false,
     description: input.description || "",
     active: input.active ?? true,
@@ -312,6 +345,7 @@ export async function createProduct(actor: AuthUser | null, input: ProductCreate
     brand?._id.toString() ?? null,
     brand?.name ?? null,
     0,
+    category.supportsSugarOptions ?? false,
   );
 }
 
@@ -352,14 +386,14 @@ export async function updateProduct(
   if (input.sellingPrice !== undefined) product.sellingPrice = input.sellingPrice;
   if (input.minimumStock !== undefined) product.minimumStock = input.minimumStock;
   if (input.trackExpiry !== undefined) product.trackExpiry = input.trackExpiry;
-  if (input.supportsSugarOptions !== undefined) product.supportsSugarOptions = input.supportsSugarOptions;
   if (input.onlineVisible !== undefined) product.onlineVisible = input.onlineVisible;
   if (input.description !== undefined) product.description = input.description || "";
   if (input.active !== undefined) product.active = input.active;
 
   await product.save();
 
-  const cat = category ?? (await CategoryModel.findById(product.category).lean<{ name: string }>());
+  const cat =
+    category ?? (await CategoryModel.findById(product.category).lean<{ name: string; supportsSugarOptions: boolean }>());
   const br = brand !== null ? brand : (await BrandModel.findById(product.brand).lean<{ name: string }>());
 
   await recordAudit({
@@ -379,6 +413,7 @@ export async function updateProduct(
     product.brand?.toString?.() ?? null,
     br?.name ?? null,
     await currentSellable(product._id.toString(), product.trackExpiry),
+    cat?.supportsSugarOptions ?? false,
   );
 }
 
@@ -387,7 +422,7 @@ export async function getProduct(actor: AuthUser | null, id: string): Promise<Pr
   requirePermission(actor, "products.read");
   await dbConnect();
   const product = await ProductModel.findById(id)
-    .populate("category", "name")
+    .populate("category", "name supportsSugarOptions")
     .populate("brand", "name")
     .lean<{
       _id: mongoose.Types.ObjectId;
@@ -395,13 +430,12 @@ export async function getProduct(actor: AuthUser | null, id: string): Promise<Pr
       barcode?: string;
       sku?: string;
       unit: string;
-      category: { _id: mongoose.Types.ObjectId; name: string } | null;
+      category: { _id: mongoose.Types.ObjectId; name: string; supportsSugarOptions: boolean } | null;
       brand: { _id: mongoose.Types.ObjectId; name: string } | null;
       purchaseCost: number;
       sellingPrice: number;
       minimumStock: number;
       trackExpiry: boolean;
-      supportsSugarOptions: boolean;
       onlineVisible: boolean;
       description?: string;
       active: boolean;
@@ -416,6 +450,7 @@ export async function getProduct(actor: AuthUser | null, id: string): Promise<Pr
     product.brand?._id?.toString() ?? null,
     product.brand?.name ?? null,
     await currentSellable(product._id.toString(), product.trackExpiry),
+    product.category?.supportsSugarOptions ?? false,
   );
 }
 
@@ -439,7 +474,7 @@ export async function listProducts(actor: AuthUser | null, query: ProductQuery) 
 
   const [products, total] = await Promise.all([
     ProductModel.find(filter)
-      .populate("category", "name")
+      .populate("category", "name supportsSugarOptions")
       .populate("brand", "name")
       .sort({ name: 1 })
       .skip((query.page - 1) * query.pageSize)
@@ -450,7 +485,10 @@ export async function listProducts(actor: AuthUser | null, query: ProductQuery) 
 
   const items = await Promise.all(
     products.map(async (p) => {
-      const category = p.category as { _id?: mongoose.Types.ObjectId; name?: string } | null | undefined;
+      const category = p.category as
+        | { _id?: mongoose.Types.ObjectId; name?: string; supportsSugarOptions?: boolean }
+        | null
+        | undefined;
       const brand = p.brand as { _id?: mongoose.Types.ObjectId; name?: string } | null | undefined;
       return toProductDto(
         p,
@@ -459,6 +497,7 @@ export async function listProducts(actor: AuthUser | null, query: ProductQuery) 
         brand?._id?.toString() ?? null,
         brand?.name ?? null,
         await currentSellable(p._id.toString(), p.trackExpiry),
+        category?.supportsSugarOptions ?? false,
       );
     }),
   );
@@ -486,13 +525,17 @@ export async function setProductActive(
     entityId: product._id.toString(),
     after: { active },
   });
+  const cat = await CategoryModel.findById(product.category)
+    .lean<{ name: string; supportsSugarOptions: boolean }>()
+    .catch(() => null);
   return toProductDto(
     product,
     product.category?.toString?.() ?? "",
-    "",
+    cat?.name ?? "",
     product.brand?.toString?.() ?? null,
     null,
     await currentSellable(product._id.toString(), product.trackExpiry),
+    cat?.supportsSugarOptions ?? false,
   );
 }
 
@@ -512,7 +555,6 @@ function toProductDto(
     sellingPrice: number;
     minimumStock: number;
     trackExpiry: boolean;
-    supportsSugarOptions: boolean;
     onlineVisible: boolean;
     description?: string;
     active: boolean;
@@ -524,6 +566,8 @@ function toProductDto(
   brandId: string | null,
   brandName: string | null,
   sellable: number,
+  /** Café sugar capability resolved from the product's Category config. */
+  supportsSugarOptions: boolean,
 ): ProductDto {
   return {
     id: p._id.toString(),
@@ -539,7 +583,7 @@ function toProductDto(
     sellingPrice: p.sellingPrice,
     minimumStock: p.minimumStock,
     trackExpiry: p.trackExpiry,
-    supportsSugarOptions: p.supportsSugarOptions,
+    supportsSugarOptions,
     onlineVisible: p.onlineVisible,
     description: p.description ?? "",
     active: p.active,

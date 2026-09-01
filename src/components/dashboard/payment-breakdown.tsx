@@ -68,7 +68,7 @@ export function PaymentBreakdown({ data, className }: PaymentBreakdownProps) {
                 <span className="text-lg" aria-hidden>{METHOD_ICONS[method]}</span>
                 <span className="font-medium text-foreground">{paymentMethodLabel(method)}</span>
               </div>
-              <div className="flex items-center gap-3 text-right">
+              <div className="flex items-center gap-3 text-end">
                 <span className={cn("font-semibold", isCash ? "text-emerald-700" : "text-foreground")}>
                   {formatEgp(amount)}
                 </span>

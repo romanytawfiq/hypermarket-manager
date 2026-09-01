@@ -10,6 +10,14 @@ export interface Category {
   name: string;
   /** Whether the category is currently selectable for new products. */
   active: boolean;
+  /**
+   * Whether products in this category support café sugar customization.
+   * The café order builder derives a product's sugar capability from its
+   * category configuration, so this is the single source of truth (not a
+   * per-product boolean). Historical café orders snapshot their own sugar
+   * levels and are never rewritten when this setting changes.
+   */
+  supportsSugarOptions: boolean;
 }
 
 export type CategoryDocument = Category &
@@ -25,6 +33,7 @@ const categorySchema = new mongoose.Schema<Category>(
       index: true,
     },
     active: { type: Boolean, default: true },
+    supportsSugarOptions: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

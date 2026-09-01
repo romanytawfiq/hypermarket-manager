@@ -17,6 +17,7 @@ import { openShift, computeExpectedCash } from "@/services/shift.service";
 import { receivePurchaseStock, getSellableStock } from "@/services/inventory.service";
 import { resetDb, createUser, buildAuthUser } from "@/test/helpers";
 import type { CafeSugarLevel } from "@/lib/cafe/sugar";
+import { cafeSearchProducts } from "@/services/cafe.service";
 
 let counter = 0;
 async function freshActor(role: "MANAGER" | "CASHIER" | "BARISTA" | "ACCOUNTANT" | "OWNER") {
@@ -35,7 +36,10 @@ interface TestItem {
 const prices = new Map<string, number>();
 
 async function makeProduct(name: string, price: number, opts: { stock: number; supportsSugarOptions?: boolean }) {
-  const cat = await createCategory(manager, { name: `فئة ${name}` });
+  const cat = await createCategory(manager, {
+    name: `فئة ${name}`,
+    supportsSugarOptions: opts.supportsSugarOptions ?? false,
+  });
   const p = await createProduct(manager, {
     name,
     categoryId: cat.id,
@@ -44,7 +48,6 @@ async function makeProduct(name: string, price: number, opts: { stock: number; s
     sellingPrice: price,
     minimumStock: 0,
     trackExpiry: false,
-    supportsSugarOptions: opts.supportsSugarOptions ?? false,
   });
   const id = p.id;
   prices.set(id, price);
@@ -486,6 +489,17 @@ describe("café orders & KDS (Phase 7 + 7.1)", () => {
     await transitionCafeOrder(barista, done.id, "COMPLETED");
     const history = await listCafeOrderHistory(manager, 50);
     expect(history.some((o) => o.id === done.id && o.status === "COMPLETED")).toBe(true);
+  });
+
+  it("cafeSearchProducts derives sugar capability from the product's category (drives the OrderBuilder selector)", async () => {
+    const sugarForSearch = await makeProduct("موكا البحث", 40, { stock: 30, supportsSugarOptions: true });
+    const plainForSearch = await makeProduct("كريمة البحث", 15, { stock: 30, supportsSugarOptions: false });
+
+    const found = await cafeSearchProducts(cashier, "البحث");
+    const sugarHit = found.find((p) => p.id === sugarForSearch);
+    const plainHit = found.find((p) => p.id === plainForSearch);
+    expect(sugarHit?.supportsSugarOptions).toBe(true);
+    expect(plainHit?.supportsSugarOptions).toBe(false);
   });
 
   /* ---- Realtime (outbox) ---- */

@@ -565,7 +565,7 @@ Creating a café order records the customer's payment: a Sale (with its payments
 
 ## REQ-CAFE-008 (Phase 7.1)
 
-Sugar belongs to the **individual cup**: supported products expose a structured sugar level per cup, and cups with different sugar levels are always distinct order lines (never merged). Products that do not advertise sugar options reject a sugar selection.
+Sugar belongs to the **individual cup**: supported products expose a structured sugar level per cup, and cups with different sugar levels are always distinct order lines (never merged). Whether a product supports sugar is derived from its **category** (`Category.supportsSugarOptions`); selecting a sugar for a product whose category does not advertise it is rejected server-side (VALIDATION). A legacy per-product flag is preserved for historical documents but is not authoritative. Changing a category's sugar setting never rewrites historical orders.
 
 ---
 

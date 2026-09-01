@@ -20,8 +20,8 @@ import { receivePurchaseStock, getSellableStock } from "@/services/inventory.ser
 import { ProductBatchModel } from "@/models/product-batch";
 import { resetDb, createUser, buildAuthUser } from "@/test/helpers";
 
-async function managerActor() {
-  const m = await createUser({ username: "mgr4", role: "MANAGER" });
+async function managerActor(username = "mgr4") {
+  const m = await createUser({ username, role: "MANAGER" });
   return buildAuthUser(m);
 }
 
@@ -287,7 +287,7 @@ describe("POS sales, payments & cashier shifts (Phase 4)", () => {
 
   it("includes recorded cash movements in the expected-cash reconciliation", async () => {
     const cashier = await cashierActor("cash_mvmt");
-    const managerActor2 = await managerActor();
+    const managerActor2 = await managerActor("mgr_mvmt");
     const shift = await openShift(cashier, { openingCash: 300 });
     const productId = await makeProduct({ name: "حلوى", purchaseCost: 5, sellingPrice: 10, stock: 5 });
 

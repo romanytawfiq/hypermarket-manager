@@ -399,8 +399,8 @@ Cashier (cafe.orders.create + sales.create)
 ↓
 Search active products / optional customer
 ↓
-Add per-cup lines: quantity, sugar level (per cup; chips only for sugar-capable products),
-  per-line note, order note — different sugar/customization stays a separate cup line
+Add per-cup lines: quantity, sugar level (per cup; `درجة السكر` dropdown beside the note, shown only
+  for products whose category supports sugar), per-line note, order note — different sugar/customization stays a separate cup line
 ↓
 Collect payment at checkout (full payment; optional cash tendered for the chance)
 ↓

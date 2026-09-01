@@ -1,7 +1,19 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getNavItems } from "@/lib/navigation";
 import { AppShell } from "@/components/dashboard/app-shell";
+
+/**
+ * The authenticated dashboard is private to the business.
+ * It must never appear in search engine results.
+ */
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 /**
  * Protected layout for the entire authenticated application.

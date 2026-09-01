@@ -29,8 +29,13 @@ export interface Product {
   minimumStock: number;
   /** Whether this product requires batch / expiry tracking. */
   trackExpiry: boolean;
-  /** Whether the café order builder offers sugar levels for this product (e.g. coffee). */
-  supportsSugarOptions: boolean;
+  /**
+   * LEGACY (backward-compat only): per-product café sugar capability. No longer
+   * the source of truth — sugar capability is derived from the product's
+   * Category (`Category.supportsSugarOptions`). Kept so existing documents
+   * round-trip unchanged; never read or written for new behavior.
+   */
+  supportsSugarOptions?: boolean;
   /** Whether the product may appear in the online store. */
   onlineVisible: boolean;
   description?: string;
@@ -70,6 +75,14 @@ const productSchema = new mongoose.Schema<Product>(
     sellingPrice: { type: Number, required: true, min: 0 },
     minimumStock: { type: Number, default: 0, min: 0 },
     trackExpiry: { type: Boolean, default: false },
+    /**
+     * LEGACY (backward-compat only): this field was the original per-product
+     * café sugar capability. It is no longer the source of truth — sugar
+     * capability is now derived from the product's Category
+     * (`Category.supportsSugarOptions`). The field is kept on the schema so
+     * existing documents persist unchanged, but it is never read or written by
+     * the application for new behavior.
+     */
     supportsSugarOptions: { type: Boolean, default: false },
     onlineVisible: { type: Boolean, default: false },
     description: { type: String, default: "" },

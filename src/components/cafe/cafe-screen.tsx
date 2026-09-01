@@ -17,6 +17,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -565,7 +572,6 @@ function OrderBuilder({
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{l.name}</p>
-                    {l.supportsSugarOptions ? <SugarChips value={l.sugarLevel} onChange={(s) => setSugar(l.id, s)} /> : null}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="outline" size="icon-xs" onClick={() => setQty(l.id, -1)} aria-label="إنقاص">
@@ -581,12 +587,42 @@ function OrderBuilder({
                     <Trash2Icon />
                   </Button>
                 </div>
-                <Input
-                  className="mt-1.5 h-7 w-full max-w-xs text-xs"
-                  value={l.notes}
-                  placeholder="ملاحظة (اختياري)"
-                  onChange={(e) => setNotes(l.id, e.target.value)}
-                />
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                  {l.supportsSugarOptions ? (
+                    <div className="grid gap-1">
+                      <Label htmlFor={`sugar-${l.id}`} className="text-xs font-medium text-muted-foreground">
+                        درجة السكر
+                      </Label>
+                      <Select
+                        value={l.sugarLevel ?? undefined}
+                        onValueChange={(s) => setSugar(l.id, s as CafeSugarLevel)}
+                      >
+                        <SelectTrigger id={`sugar-${l.id}`} className="h-7 text-xs" aria-label="اختر درجة السكر">
+                          <SelectValue placeholder="اختر درجة السكر" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SUGAR_CHOICES.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {CAFE_SUGAR_LABELS[s]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                  <div className="grid gap-1">
+                    <Label htmlFor={`notes-${l.id}`} className="text-xs font-medium text-muted-foreground">
+                      ملاحظة
+                    </Label>
+                    <Input
+                      id={`notes-${l.id}`}
+                      className="h-7 w-full text-xs"
+                      value={l.notes}
+                      placeholder="ملاحظة (اختياري)"
+                      onChange={(e) => setNotes(l.id, e.target.value)}
+                    />
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
@@ -717,35 +753,6 @@ function OrderBuilder({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function SugarChips({
-  value,
-  onChange,
-}: {
-  value: CafeSugarLevel | null;
-  onChange: (s: CafeSugarLevel) => void;
-}) {
-  return (
-    <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label="درجة السكر">
-      {SUGAR_CHOICES.map((s) => (
-        <button
-          key={s}
-          type="button"
-          aria-pressed={value === s}
-          className={cn(
-            "rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
-            value === s
-              ? "border-primary bg-primary text-primary-foreground"
-              : "bg-background text-muted-foreground hover:bg-muted",
-          )}
-          onClick={() => onChange(s)}
-        >
-          {CAFE_SUGAR_LABELS[s]}
-        </button>
-      ))}
     </div>
   );
 }
