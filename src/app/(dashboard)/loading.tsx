@@ -15,14 +15,44 @@ export default function DashboardLoading() {
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-4 w-72" />
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-24" />
+
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-background p-3">
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-9 w-40" />
+      </div>
+
+      {/* KPI Row */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <Skeleton key={i} className="h-24 rounded-lg border bg-background p-4" />
         ))}
       </div>
-      <div className="rounded-lg border bg-background p-4">
-        <Skeleton className="h-8 w-full" />
+
+      {/* Shift Summary */}
+      <Skeleton className="h-48 rounded-lg border bg-background p-4" />
+
+      {/* Sales Trend + Payment Breakdown */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-80 rounded-lg border bg-background p-4" />
+        <Skeleton className="h-80 rounded-lg border bg-background p-4" />
       </div>
+
+      {/* Top Products + Inventory Alerts */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-64 rounded-lg border bg-background p-4" />
+        <Skeleton className="h-64 rounded-lg border bg-background p-4" />
+      </div>
+
+      {/* Financial Summary */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <Skeleton key={i} className="h-40 rounded-lg border bg-background p-4" />
+        ))}
+      </div>
+
+      {/* Quick Actions */}
+      <Skeleton className="h-48 rounded-lg border bg-background p-4" />
     </div>
   );
 }

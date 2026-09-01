@@ -13,8 +13,9 @@ import {
   listSales,
   getSale,
   listSalesByShift,
+  lookupPosBarcode,
 } from "@/services/sales.service";
-import type { SaleDto, PosProductDto } from "@/services/sales.service";
+import type { SaleDto, PosProductDto, BarcodeLookupResult } from "@/services/sales.service";
 import { resolveError } from "@/lib/errors";
 
 /**
@@ -60,6 +61,19 @@ export async function posSearchAction(query: string): Promise<PosProductDto[]> {
     return await posSearchProducts(await getCurrentUser(), query);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Exact barcode lookup for the camera/USB scanner flow. Distinguishes an
+ * inactive product from an unknown barcode so the scanner can show the right
+ * Arabic message without re-implementing product validation.
+ */
+export async function lookupBarcodeAction(barcode: string): Promise<BarcodeLookupResult> {
+  try {
+    return await lookupPosBarcode(await getCurrentUser(), barcode);
+  } catch {
+    return { status: "notfound" };
   }
 }
 

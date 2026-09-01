@@ -6,8 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 6 Complete**
-> Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). See [Development Status](#development-status).
+> **Status: Phase 6 Complete + Dashboard Overview**
+> Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). The Dashboard Overview redesign (role-aware business analytics, KPIs, sales trends, inventory alerts, financial summaries) and the POS **camera barcode scanner** are complete. See [Development Status](#development-status).
 
 ---
 
@@ -102,17 +102,18 @@ Specifically, the platform handles:
 The platform is organized into the following major domains:
 
 1. **Authentication & Authorization** — roles and permissions.
-2. **POS** — retail checkout and payments.
-3. **Cashier Shifts** — opening cash, transactions, closing reconciliation.
-4. **Inventory** — products, stock, stock movements, expiry, adjustments.
-5. **Suppliers** — supplier accounts, purchases, payments, balances.
-6. **Customers** — customer profiles, credit sales, payments, balances.
-7. **Accounting** — expenses, receivables, payables, reports.
-8. **Café** — orders and the barista workflow.
-9. **Printing** — receipts and printable business documents.
-10. **Online Store** — public catalog, cart, checkout, orders.
-11. **Delivery** — delivery status and order fulfillment.
-12. **Reports** — daily, weekly, monthly, yearly, product, cashier, supplier, customer, and payment reports.
+2. **Dashboard** — role-aware business overview with KPIs, sales trends, inventory alerts, financial summaries, and quick actions.
+3. **POS** — retail checkout and payments.
+4. **Cashier Shifts** — opening cash, transactions, closing reconciliation.
+5. **Inventory** — products, stock, stock movements, expiry, adjustments.
+6. **Suppliers** — supplier accounts, purchases, payments, balances.
+7. **Customers** — customer profiles, credit sales, payments, balances.
+8. **Accounting** — expenses, receivables, payables, reports.
+9. **Café** — orders and the barista workflow.
+10. **Printing** — receipts and printable business documents.
+11. **Online Store** — public catalog, cart, checkout, orders.
+12. **Delivery** — delivery status and order fulfillment.
+13. **Reports** — daily, weekly, monthly, yearly, product, cashier, supplier, customer, and payment reports.
 
 ---
 
@@ -233,7 +234,7 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-Phases 0–6 are implemented and the test suite passes (96 tests across 13 files).
+Phases 0–6 are implemented and the test suite passes (96 tests across 13 files). The Dashboard Overview redesign is complete.
 
 | Phase | Status |
 |-------|--------|
@@ -244,6 +245,7 @@ Phases 0–6 are implemented and the test suite passes (96 tests across 13 files
 | **4 — POS, Payments & Cashier Shifts** | ✅ Complete |
 | **5 — Customer Credit & Receivables** | ✅ Complete |
 | **6 — Expenses & Accounting** | ✅ Complete |
+| **Dashboard Overview** | ✅ Complete |
 | **7 — Café / KDS** | Planned |
 | **8 — Printing** | Planned |
 | **9 — Online Store & Delivery** | Planned |
@@ -262,7 +264,7 @@ Supplier accounts, purchases and receiving (stock in), supplier ledger + outstan
 
 ### Phase 4 — POS, Payments & Cashier Shifts (Implemented)
 
-Full cashier POS: product search/scan, cart and quantities, mixed payments across methods (cash, cards, InstaPay, Vodafone Cash), cash tendered + change, thermal receipt, sequential invoices. Cashier shifts: open with opening cash, expected-cash reconciliation, CASH_IN/CASH_OUT/EXPENSE/ADJUSTMENT movements, close variance. A POS completeness audit confirmed the end-to-end flow (login → open shift → sell → pay → receipt → new sale).
+Full cashier POS: product search/scan, cart and quantities, mixed payments across methods (cash, cards, InstaPay, Vodafone Cash), cash tendered + change, thermal receipt, sequential invoices. Cashier shifts: open with opening cash, expected-cash reconciliation, CASH_IN/CASH_OUT/EXPENSE/ADJUSTMENT movements, close variance. A POS completeness audit confirmed the end-to-end flow (login → open shift → sell → pay → receipt → new sale). **Barcode scanning** supports both USB/keyboard scanners and a real device-camera scanner (`@zxing/browser`) — both funnel through one common handler into the same cart; scans decode locally in the browser and are never uploaded or stored.
 
 ### Phase 5 — Customer Credit & Receivables (Implemented)
 

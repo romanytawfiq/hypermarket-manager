@@ -507,5 +507,61 @@ export async function getActorActiveShiftId(actor: AuthUser | null): Promise<str
   return s ? s.id : null;
 }
 
+export interface BarcodeLookupResult {
+  status: "found" | "inactive" | "notfound";
+  product?: PosProductDto;
+}
+
+/**
+ * Exact barcode lookup for the POS scanner workflow (camera + USB/keyboard).
+ *
+ * Unlike `posSearchProducts` this also inspects *inactive* products so the
+ * scanner can show a distinct "product is deactivated" (BR-004) message rather
+ * than a generic "not found". Only active products are returned as `found`, and
+ * found products still carry server-derived sellable stock so the existing cart
+ * validation (never exceeding available stock) applies unchanged.
+ */
+export async function lookupPosBarcode(
+  actor: AuthUser | null,
+  barcode: string,
+): Promise<BarcodeLookupResult> {
+  requirePermission(actor, "sales.create");
+  await dbConnect();
+
+  const code = barcode.trim();
+  if (!code) return { status: "notfound" };
+
+  const product = await ProductModel.findOne({ barcode: code })
+    .select("name barcode sku unit sellingPrice trackExpiry active")
+    .lean<{
+      _id: mongoose.Types.ObjectId;
+      name: string;
+      barcode?: string;
+      sku?: string;
+      unit: string;
+      sellingPrice: number;
+      trackExpiry: boolean;
+      active: boolean;
+    }>();
+
+  if (!product) return { status: "notfound" };
+  if (!product.active) return { status: "inactive", product: undefined };
+
+  const stock = await getSellableStock(product._id.toString(), product.trackExpiry);
+  return {
+    status: "found",
+    product: {
+      id: product._id.toString(),
+      name: product.name,
+      barcode: product.barcode ?? null,
+      sku: product.sku ?? null,
+      unit: product.unit,
+      sellingPrice: product.sellingPrice,
+      trackExpiry: product.trackExpiry,
+      sellable: stock.sellable,
+    },
+  };
+}
+
 /** Arabic label helpers for receipts/UI. */
 export { paymentMethodLabel };

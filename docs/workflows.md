@@ -66,6 +66,20 @@ Finalize Transaction
 Print Receipt
 ```
 
+### Scan/Search Product — input methods
+
+Both methods funnel through one common barcode handler
+(`handleBarcodeDetected` → `lookupBarcodeAction` → server lookup → `addToCart`):
+
+- **Barcode via USB/keyboard scanner** — the scanner types the code and sends Enter;
+  the search field catches it and adds the matching product. Falls back to name/SKU
+  search when the typed value is not a recognized barcode.
+- **Barcode via camera** — cashier clicks `مسح بالكاميرا` (only while a shift is OPEN),
+  the dialog requests camera permission on first use, decodes the barcode locally in
+  the browser, then the same handler looks up and adds the product.
+  Outcomes: `found` (added), `inactive` (deactivated product, not sellable),
+  `notfound` (no match), `error` (camera unavailable/denied).
+
 ---
 
 # 3. Mixed Payment Workflow

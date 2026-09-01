@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CameraIcon,
   CheckIcon,
   LockIcon,
   MinusIcon,
@@ -14,8 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { createSaleAction, posSearchAction } from "@/actions/sales-actions";
+import { createSaleAction, posSearchAction, lookupBarcodeAction } from "@/actions/sales-actions";
 import { posSearchCustomersAction } from "@/actions/customer-actions";
+import { BarcodeScanner, type ScanOutcome } from "@/components/pos/barcode-scanner";
 import {
   getActiveShiftAction,
   openShiftAction,
@@ -70,6 +72,7 @@ export function PosScreen({
   const [results, setResults] = useState<PosProductDto[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<PosCustomerDto | null>(null);
   const [onCredit, setOnCredit] = useState(false);
@@ -175,17 +178,41 @@ export function PosScreen({
   };
 
   /**
+   * Common barcode handler. Both the camera scanner and the keyboard/USB
+   * scanner funnel through this so product lookup, inactive detection, and
+   * cart addition are never duplicated. The camera scanner presents the
+   * returned outcome as Arabic feedback; the keyboard path also falls back to
+   * name/SKU search because a typed query may not be a barcode.
+   */
+  const handleBarcodeDetected = async (barcode: string): Promise<ScanOutcome> => {
+    const code = (barcode ?? "").trim();
+    if (!code) return { status: "notfound" };
+    const result = await lookupBarcodeAction(code);
+    if (result.status === "found" && result.product) {
+      addToCart(result.product);
+      return { status: "added", productName: result.product.name };
+    }
+    if (result.status === "inactive") return { status: "inactive" };
+    return { status: "notfound" };
+  };
+
+  /**
    * Barcode/scan fast path: USB scanners type the code then send Enter within
    * milliseconds — before the 250ms debounce has populated `results`. On Enter
-   * we await a fresh lookup and add the top match immediately so a scan adds
-   * the product without any extra click. Unknown codes surface a clear message.
+   * we try the common barcode handler first; if it isn't a known barcode we
+   * fall back to name/SKU search so a typed product name still works.
    */
   const handleScanSubmit = async () => {
     const q = searchQuery.trim();
     if (!q) return;
+    const outcome = await handleBarcodeDetected(q);
+    if (outcome.status === "added") return;
     const res = await runSearch(q);
     if (res.length > 0 && res[0]) {
       addToCart(res[0]);
+    } else if (outcome.status === "inactive") {
+      setError("هذا المنتج غير نشط ولا يمكن بيعه");
+      toast.warning("هذا المنتج غير نشط ولا يمكن بيعه");
     } else {
       setError("المنتج غير موجود");
       toast.warning("المنتج غير موجود");
@@ -389,44 +416,58 @@ export function PosScreen({
 
       <div className="grid gap-6 md:grid-cols-[1fr_360px]">
         <div className="grid gap-4">
-          <div className="relative" ref={searchWrapperRef}>
-            <ScanBarcodeIcon
-              className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              onKeyDown={onSearchKeyDown}
-              placeholder="مسح أو بحث عن منتج (باركود / رمز / اسم)"
-              className="ps-9"
-              disabled={!shift || shift.status !== "OPEN"}
-            />
-            {searchOpen && (searching || results.length > 0) ? (
-              <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-72 overflow-auto rounded-lg border bg-popover shadow-lg">
-                {searching ? (
-                  <p className="p-3 text-sm text-muted-foreground">جارٍ البحث…</p>
-                ) : (
-                  results.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => addToCart(r)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-muted"
-                    >
-                      <span className="font-medium">{r.name}</span>
-                      <span className="flex items-center gap-2 text-muted-foreground">
-                        <span>{formatEgp(r.sellingPrice)}</span>
-                        <span className="text-xs">
-                          ({r.sellable} {r.unit})
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1" ref={searchWrapperRef}>
+              <ScanBarcodeIcon
+                className="absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e) => onSearchChange(e.target.value)}
+                onKeyDown={onSearchKeyDown}
+                placeholder="مسح أو بحث عن منتج (باركود / رمز / اسم)"
+                className="ps-9"
+                disabled={!shift || shift.status !== "OPEN"}
+              />
+              {searchOpen && (searching || results.length > 0) ? (
+                <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-72 overflow-auto rounded-lg border bg-popover shadow-lg">
+                  {searching ? (
+                    <p className="p-3 text-sm text-muted-foreground">جارٍ البحث…</p>
+                  ) : (
+                    results.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => addToCart(r)}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-muted"
+                      >
+                        <span className="font-medium">{r.name}</span>
+                        <span className="flex items-center gap-2 text-muted-foreground">
+                          <span>{formatEgp(r.sellingPrice)}</span>
+                          <span className="text-xs">
+                            ({r.sellable} {r.unit})
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : null}
+
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              size="lg"
+              className="shrink-0"
+              disabled={!shift || shift.status !== "OPEN"}
+              onClick={() => setScannerOpen(true)}
+              aria-label="مسح الباركود بالكاميرا"
+            >
+              <CameraIcon className="size-4" aria-hidden />
+              مسح بالكاميرا
+            </Button>
           </div>
 
           <div className="rounded-lg border bg-background">
@@ -819,6 +860,12 @@ export function PosScreen({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <BarcodeScanner
+        open={scannerOpen}
+        onOpenChange={setScannerOpen}
+        onDetect={handleBarcodeDetected}
+      />
     </div>
   );
 }

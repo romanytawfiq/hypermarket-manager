@@ -204,6 +204,24 @@ Print
 
 with minimal unnecessary interaction.
 
+### Camera barcode scanner UX
+
+The camera scanner is an optional assist to the primary keyboard/USB barcode path:
+
+- A clear primary button `مسح بالكاميرا` sits beside the search field and opens a
+  focused dialog; it is disabled when no shift is OPEN (an OPEN shift is required to sell).
+- The dialog keeps the UI minimal: a live camera preview, a clear status line, and a
+  close button. No decorative animations.
+- Camera permission is requested only when scanning starts. Prefer the rear/environment
+  camera on mobile, fall back to any available camera; a camera selector appears only
+  when multiple cameras exist.
+- Status messages are Arabic and actionable, e.g. "وجّه الكاميرا نحو الباركود",
+  "جاري البحث عن المنتج...", "تمت إضافة المنتج", "لم يتم العثور على منتج بهذا الباركود.",
+  "هذا المنتج غير نشط ولا يمكن بيعه.", "لا يمكن الوصول إلى الكاميرا.",
+  "المسح بالكاميرا غير متاح على هذا الجهاز."
+- Decoding is local in the browser; camera frames are never uploaded or stored.
+- The camera stops and its stream is released when the dialog closes or the screen unmounts.
+
 ---
 
 # 7. POS Layout

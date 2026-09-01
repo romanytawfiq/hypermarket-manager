@@ -595,3 +595,42 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 - **Navigation:** `getNavItems` (`src/lib/navigation.ts`) exposes `نقطة البيع` → `/pos`, filtered by `sales.create` — visibility is only a UX concern; enforcement is server-side.
 - **Enforcement:** the page redirects when the actor lacks `sales.create` (`redirect("/")`); anonymous requests are bounced to `/login` by the `(dashboard)` layout. Actions/services enforce at the boundary via `requirePermission`.
 - **Reseed procedure:** seeding is additive/idempotent — run `npm run seed` (or the deployed seed) again after upgrading to add new phase permissions to already-seeded roles; it never removes admin-granted permissions or re-imposes deliberately removed defaults.
+
+### POS Barcode Scanning (finalized)
+
+- **Goal:** add a real camera barcode scanner to the existing POS without rebuilding it. It complements the existing USB/keyboard scanner path.
+- **Library:** `@zxing/browser` + `@zxing/library` (`BrowserMultiFormatOneDReader`). No scanner library existed before; zxing decodes locally in the browser, so camera frames are never uploaded or stored. `BarcodeDetector` is not relied on exclusively (browser support gaps); zxing is used directly.
+- **1D-focused decoder:** the reader is `BrowserMultiFormatOneDReader` (the 1D-only wrapper from `@zxing/browser`), not the generic `BrowserMultiFormatReader`. It routes every frame through `MultiFormatOneDReader`/`OneDReader`, so it only attempts 1D formats and avoids the QR `FinderPattern` overhead. This eliminates the library-level `MultiFormatReader: non-ReaderException from reader: NotFoundException` `console.warn` noise that the generic multi-format reader produced on every frame (zxing's `NotFoundException` extends `Exception`, not `ReaderException`, so its QR sub-reader failure was misclassified as a non-ReaderException and logged). Supported formats are confined to retail 1D codes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF.
+- **Decode hints:** a single module-scope hints map is built once (`POSSIBLE_FORMATS` = the 1D formats above, plus `TRY_HARDER: true`) and passed to a single reader instance held across frames for stable, stateful decoding. `TRY_HARDER` makes `OneDReader` scan every image row rather than ~25 sampled rows, which is required to find small/thin retail barcode labels.
+- **One common handler:** both camera and USB/keyboard scans funnel through a single client handler `handleBarcodeDetected` in `pos-screen.tsx` → `lookupBarcodeAction` (`src/actions/sales-actions.ts`) → `lookupPosBarcode` (`src/services/sales.service.ts`). The handler trims the value, looks the product up, then calls the existing `addToCart`. No duplicated lookup/business logic: the scanner only produces a barcode value; the existing POS owns validity, stock/expiry, pricing, permissions, and cart rules (§14).
+- **Server lookup outcomes:** `lookupPosBarcode` returns `{ status: "found" | "inactive" | "notfound" }` (with a `PosProductDto` when found). It requires `sales.create` (same as the POS page) and matches exact barcodes including inactive products so the UI can show a distinct "inactive" message (BR-004). Regular POS search (`posSearchProducts`) stays active-only.
+- **Component:** `src/components/pos/barcode-scanner.tsx` (`BarcodeScanner`, exports `ScanOutcome`) — a dialog that requests camera permission on start and acquires the camera through ZXing's `decodeFromVideoDevice` (the stable, battle-tested path that builds minimal, universally-supported constraints: `{ facingMode: 'environment' }` by default, or `{ deviceId: { exact } }` once the user picks a specific camera via the selector). It intentionally does NOT pass custom `width`/`height`/`ideal`-facingMode resolution constraints, because a negotiated high-resolution stream can stall video load and trip ZXing's `tryPlayVideoTimeout`, which disposes the media stream and stops the camera shortly after the preview appears. It decodes continuously (1D formats only; see decoder notes above) with a cooldown, and releases the camera stream on close/unmount. Expected per-frame "not found" misses are handled silently; unexpected start/attach errors still surface with Arabic user feedback and technical logs. The decode loop only disposes the camera on a genuine scan-loop failure — an ordinary `NotFoundException` (no barcode in the current frame) simply continues the loop and never touches the media stream.
+- **Permission & availability:** only users with `sales.create` can open the scanner (button shown in the POS UI, disabled unless a shift is OPEN). The POS keeps working when the camera is unavailable (manual search / USB keyboard scanner).
+- **Secure context:** production camera scanning requires a secure (HTTPS or localhost) context — `navigator.mediaDevices` is undefined otherwise; no insecure workaround is provided.
+
+### Dashboard Overview (finalized)
+
+- **Route:** `/` — the dashboard home inside the authenticated `(dashboard)` area (`src/app/(dashboard)/page.tsx`). It is a Server Component that fetches role-filtered data via `getDashboardData` and renders `DashboardClient` for interactive period selection.
+- **Data loading:** `getDashboardAction` server action calls `getDashboardData` (`src/services/dashboard.service.ts`) which runs independent aggregations in parallel via `Promise.all`. Each section is permission-gated at the service level — unauthorized data is never queried, let alone sent to the client.
+- **Sections & permissions:**
+  - **Sales KPIs / Trend / Payment Breakdown / Top Products** — require `sales.read` (Owner/Manager/Accountant/Cashier).
+  - **Shift Summary** — require `shifts.read` + actor is CASHIER; shows active shift, expected cash, and quick actions.
+  - **Inventory Alerts (low/out/expiring/expired/replenishment)** — require `inventory.read` (Owner/Manager/Accountant/Warehouse).
+  - **Receivables** — require `customers.view_ledger` or `accounting.read` (Owner/Manager/Accountant).
+  - **Payables** — require `suppliers.view_ledger` or `accounting.read` (Owner/Manager/Accountant).
+  - **Expenses** — require `expenses.read` (Owner/Manager/Accountant).
+  - **Profit (Gross/Net)** — require `accounting.read` (Owner/Manager/Accountant); calculated from real COGS and expenses, never revenue-only.
+  - **Quick Actions** — filtered by user's permissions (`sales.create`, `products.create`, `purchases.receive`, `customer_payments.create`, `supplier_payments.create`, `expenses.create`, `inventory.read`, `inventory.view_replenishment`).
+- **Period selector:** Client-side dropdown (`اليوم` / `هذا الأسبوع` / `هذا الشهر` / `فترة مخصصة`) calls `getDashboardAction` via `useTransition`; default is `اليوم`.
+- **Empty states:** Every section renders an honest Arabic message when no data exists (e.g., `لا توجد مبيعات خلال هذه الفترة`).
+- **Visual hierarchy (per AGENTS.md §20):**
+  1. KPI row (current business state)
+  2. Shift summary (issues requiring attention)
+  3. Sales trend + payment breakdown (trends)
+  4. Top products + inventory alerts (analytics + alerts)
+  5. Financial summaries (receivables/payables/expenses/profit)
+  6. Quick actions (secondary)
+- **Charts:** Uses Recharts `Area` + `Line` for the 7-day sales trend; no decorative charts.
+- **Loading:** Route-level `loading.tsx` provides structural skeletons matching the final layout; server component streams immediately.
+- **RTL/Accessibility:** Arabic-first labels, logical CSS properties, heading hierarchy (h1 → h2), visible focus states, color not sole status indicator.
+- **No generic AI patterns:** Avoids huge rounded cards, excessive gradients, glassmorphism, meaningless animations, decorative blobs.

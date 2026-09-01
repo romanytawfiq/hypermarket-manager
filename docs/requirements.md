@@ -375,6 +375,24 @@ Cashiers can create retail sales.
 
 Products can be added using barcode or search.
 
+## REQ-SALE-002a (barcode scanning)
+
+Products can be added to a POS cart by barcode using any of these input methods,
+all sharing one common handler (`handleBarcodeDetected` → `lookupBarcodeAction` → `posSearchProducts`/`lookupPosBarcode` → `addToCart`):
+
+- **USB / keyboard scanner** — the scanner types the barcode and presses Enter; the existing search input handles it.
+- **Camera scanner** — a device camera scans the barcode; decoded locally in the browser (never uploaded or stored).
+
+Behavior:
+- The scanner only produces a barcode value. Product lookup, validity, stock/expiry,
+  pricing, permissions, and cart rules remain owned by the existing POS flow (server-side).
+- Barcode lookup must distinguish three outcomes and show a clear Arabic message:
+  `found` (adds to cart), `inactive` (product deactivated, BR-004 — not sellable),
+  `notfound` (no product matches).
+- Requires the same permission as the POS page (`sales.create`).
+- The camera must stop and release its stream on close/unmount; permission is
+  requested only when scanning starts; prefers the rear/environment camera on mobile.
+
 ## REQ-SALE-003
 
 A sale must contain one or more sale items.
