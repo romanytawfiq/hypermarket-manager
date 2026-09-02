@@ -200,8 +200,12 @@ Thermal receipt printing is a first-class feature.
 - Support for **58mm** and **80mm** thermal printers.
 - Receipts support **Arabic RTL**.
 - Print layouts are optimized for narrow paper.
-- Printable documents are rendered from persisted transaction data (never from uncommitted cart state).
-- The strategy is phased: HTML/CSS browser printing first, with native ESC/POS printing as a later enhancement.
+- Printable documents are rendered from persisted transaction data (never from uncommitted cart state) through a server-derived `ReceiptViewModel`.
+- Printable types: **sales receipts**, **café order receipts** (order items + sugar/note + linked invoice), and **customer payment receipts**.
+- Receipts print on a dedicated authenticated, non-indexable route with auto-print and manual print fallback; previews are shown in the app before printing.
+- Reprints reuse the stored invoice/order number and never create a new transaction.
+- Printing is permission-controlled server-side (`receipts.print` + the relevant read permission); the store identity on receipts is configurable at runtime.
+- The strategy is phased: HTML/CSS browser printing first, with native ESC/POS printing as a later enhancement. Physical validation against real thermal printers is still outstanding.
 
 ---
 

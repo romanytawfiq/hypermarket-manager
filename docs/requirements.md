@@ -625,9 +625,35 @@ Receipts must support 80mm thermal printers.
 
 Printed receipts must represent the stored transaction accurately.
 
+Prices and totals printed on a sale receipt must come from the stored `Sale`/`SaleItem` snapshot at sale time — never from live catalog prices, and never from uncommitted cart state.
+
 ## REQ-PRINT-006
 
 The system should support print preview where useful.
+
+## REQ-PRINT-007
+
+Café orders must be printable through the receipt linked to the order's Sale. The receipt shows the order items (with sugar level and note) and the financial totals of the linked immutable Sale.
+
+## REQ-PRINT-008
+
+Customer payment receipts must be printable. A payment receipt shows the stored payment record (method, amount) and the customer name.
+
+## REQ-PRINT-009
+
+Reprints must reuse the stored invoice/order number. Reprinting a receipt must never create a new sale or alter the stored transaction.
+
+## REQ-PRINT-010
+
+Printing must be permission-controlled. Each printable type requires `receipts.print` plus the corresponding read permission (`sales.read` for sales, `cafe.orders.read` for café, `customer_payments.read` for customer payments), enforced server-side.
+
+## REQ-PRINT-011
+
+Print routes must be non-indexable and must not expose ids that the actor cannot access (IDOR-safe lookup, fetch requires an existing record).
+
+## REQ-PRINT-012
+
+The store identity printed on receipts (name, address, phone, footer) must be configurable at runtime rather than hardcoded.
 
 ---
 

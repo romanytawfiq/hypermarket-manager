@@ -555,18 +555,33 @@ Reports should not become the primary source of truth.
 
 # 19. Printing Domain
 
-## Receipt
+## ReceiptViewModel
 
-Conceptually represents a printable representation of a stored business transaction.
+Server-derived read model for printing. **No receipt collection exists** — a receipt is a projection of a stored transaction. It is never persisted and reprints never create records.
+
+Fields (subset used by all types):
+
+- `kind`: `"sale" | "cafe-order" | "customer-payment"`
+- `referenceNumber`, optional `orderNumber`/`invoiceNumber` (café), `actorUsername`, `createdAt`, optional `customerName`
+- `items[]`: `name`, `unitPrice`, `quantity`, `lineTotal`, optional `note`
+- `totalAmount`, `payments[]` (`method`, `methodLabel`, `amount`), `totalPaid`, `balanceDue`, `paymentState`
+- `cashTendered`, `change`
+
+Sources:
+
+- **sales receipt** — stored `Sale` + `SaleItem` (snapshot prices) + `SalePayment` entries
+- **café order receipt** — `CafeOrder` items/notes/sugar levels + financials from the linked `Sale` (404-style error "لا توجد فاتورة مرتبطة بهذا الطلب" when no `saleId`)
+- **customer payment receipt** — stored `CustomerPayment`; single line "تحصيل دفعة من العميل"
 
 Examples:
 
 - sales receipt
+- café order receipt
 - customer payment receipt
-- supplier payment receipt
-- shift closing report
+- supplier payment receipt (future)
+- shift closing report (future)
 
-The receipt should derive from persisted transaction data.
+The receipt must always derive from persisted transaction data.
 
 ---
 

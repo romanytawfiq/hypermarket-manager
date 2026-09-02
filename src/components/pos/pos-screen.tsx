@@ -30,7 +30,7 @@ import type { PosCustomerDto } from "@/services/customer.service";
 import type { ShiftDto } from "@/services/shift.service";
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/sales/constants";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Receipt } from "@/components/pos/receipt";
+import { SaleReceiptDialog } from "@/components/printing/sale-receipt-dialog";
 import { cn } from "@/lib/utils";
 
 function formatEgp(n: number): string {
@@ -865,7 +865,11 @@ export function PosScreen({
           </DialogHeader>
           {lastSale ? (
             <div className="grid gap-3">
-              <Receipt sale={lastSale} canPrint={hasReceiptsPrint} onClose={() => setLastSale(null)} />
+              <SaleReceiptDialog
+                saleId={lastSale.id}
+                canPrint={hasReceiptsPrint}
+                onClose={() => setLastSale(null)}
+              />
               <Button
                 className="w-full"
                 size="lg"

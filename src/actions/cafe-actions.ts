@@ -109,7 +109,8 @@ export async function listCafeOrderHistoryAction(limit = 50): Promise<CafeOrderD
 export async function cafeSearchProductsAction(query: string): Promise<CafeProductSearchDto[]> {
   try {
     return await cafeSearchProducts(await getCurrentUser(), query);
-  } catch {
+  } catch (error) {
+    console.error("[cafe-actions] cafeSearchProductsAction error:", error);
     return [];
   }
 }

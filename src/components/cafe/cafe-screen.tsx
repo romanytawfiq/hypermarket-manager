@@ -11,6 +11,7 @@ import {
   SearchIcon,
   HistoryIcon,
   CheckIcon,
+  PrinterIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,14 +44,27 @@ import {
   formatAge,
   formatShortTime,
 } from "@/lib/cafe/format";
-import type { CafeOrderDto, CafeProductSearchDto, CafeCustomerSearchDto } from "@/services/cafe.service";
+import type {
+  CafeOrderDto,
+  CafeProductSearchDto,
+  CafeCustomerSearchDto,
+} from "@/services/cafe.service";
 import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   type PaymentMethod,
 } from "@/lib/sales/constants";
-import { CAFE_SUGAR_LEVELS, CAFE_SUGAR_LABELS, type CafeSugarLevel } from "@/lib/cafe/sugar";
-import { type CafeCartLine, upsertLine, selectSugar, defaultSugarFor } from "@/lib/cafe/cart";
+import {
+  CAFE_SUGAR_LEVELS,
+  CAFE_SUGAR_LABELS,
+  type CafeSugarLevel,
+} from "@/lib/cafe/sugar";
+import {
+  type CafeCartLine,
+  upsertLine,
+  selectSugar,
+  defaultSugarFor,
+} from "@/lib/cafe/cart";
 
 const SUGAR_CHOICES: CafeSugarLevel[] = [...CAFE_SUGAR_LEVELS];
 
@@ -61,6 +75,7 @@ export function CafeScreen({
   canTransition,
   canCancel,
   hasKds,
+  canPrint,
 }: {
   initialActive: CafeOrderDto[];
   initialHistory: CafeOrderDto[];
@@ -68,6 +83,8 @@ export function CafeScreen({
   canTransition: boolean;
   canCancel: boolean;
   hasKds: boolean;
+  /** `receipts.print` — shows café-receipt print actions (cashier, not barista). */
+  canPrint: boolean;
 }) {
   const [active, setActive] = useState(initialActive);
   const [history, setHistory] = useState(initialHistory);
@@ -76,14 +93,15 @@ export function CafeScreen({
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   // Track the callbacks we hand to the realtime hook so it always sees fresh ones.
-  const handlersRef = useRef({ onEvent: undefined as undefined | (() => void), onReconnect: undefined as undefined | (() => void) });
+  const handlersRef = useRef({
+    onEvent: undefined as undefined | (() => void),
+    onReconnect: undefined as undefined | (() => void),
+  });
 
   const refresh = (mode: "kds" | "active") => {
     startTransition(async () => {
       const items =
-        mode === "kds"
-          ? await listKdsOrdersAction()
-          : await listActiveCafeOrdersAction();
+        mode === "kds" ? await listKdsOrdersAction() : await listActiveCafeOrdersAction();
       setActive(items);
     });
   };
@@ -114,6 +132,15 @@ export function CafeScreen({
       order.invoiceNumber
         ? `تم إنشاء الطلب ${order.orderNumber} — الفاتورة ${order.invoiceNumber}`
         : "تم إنشاء طلب الكافيه",
+      order.invoiceNumber && order.id
+        ? {
+            action: {
+              label: "طباعة",
+              onClick: () =>
+                window.open(`/print/cafe/${order.id}`, "_blank", "noopener,noreferrer"),
+            },
+          }
+        : undefined,
     );
     refresh(hasKds ? "kds" : "active");
   };
@@ -135,7 +162,10 @@ export function CafeScreen({
               شاشة الباريستا
             </Button>
           ) : null}
-          <Button variant={showHistory ? "default" : "outline"} onClick={() => setShowHistory((v) => !v)}>
+          <Button
+            variant={showHistory ? "default" : "outline"}
+            onClick={() => setShowHistory((v) => !v)}
+          >
             <HistoryIcon className="size-4" aria-hidden />
             السجل
           </Button>
@@ -149,7 +179,7 @@ export function CafeScreen({
       </div>
 
       {showHistory ? (
-        <HistoryTable orders={history} onLoad={loadHistory} />
+        <HistoryTable orders={history} onLoad={loadHistory} canPrint={canPrint} />
       ) : (
         <ActiveOrders
           orders={active}
@@ -157,13 +187,19 @@ export function CafeScreen({
           pendingOrderId={pendingOrderId}
           canTransition={canTransition}
           canCancel={canCancel}
+          canPrint={canPrint}
           onTransition={(id, status) => {
             setPendingOrderId(id);
             startTransition(async () => {
-              const res = await transitionCafeOrderAction({ orderId: id, targetStatus: status });
+              const res = await transitionCafeOrderAction({
+                orderId: id,
+                targetStatus: status,
+              });
               setPendingOrderId(null);
               if (res.order) {
-                toast.success(`تم تغيير الحالة إلى ${CAFE_STATUS_LABELS[res.order.status]}`);
+                toast.success(
+                  `تم تغيير الحالة إلى ${CAFE_STATUS_LABELS[res.order.status]}`,
+                );
               } else if (res.error) {
                 toast.error(res.error);
               }
@@ -182,11 +218,23 @@ export function CafeScreen({
 
 function ConnectionBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string }> = {
-    connected: { label: "متصل", cls: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-    connecting: { label: "جارٍ الاتصال", cls: "bg-amber-100 text-amber-800 border-amber-200" },
-    reconnecting: { label: "إعادة الاتصال...", cls: "bg-amber-100 text-amber-800 border-amber-200" },
+    connected: {
+      label: "متصل",
+      cls: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    },
+    connecting: {
+      label: "جارٍ الاتصال",
+      cls: "bg-amber-100 text-amber-800 border-amber-200",
+    },
+    reconnecting: {
+      label: "إعادة الاتصال...",
+      cls: "bg-amber-100 text-amber-800 border-amber-200",
+    },
   };
-  const s = map[status] ?? { label: "جارٍ الاتصال", cls: "bg-amber-100 text-amber-800 border-amber-200" };
+  const s = map[status] ?? {
+    label: "جارٍ الاتصال",
+    cls: "bg-amber-100 text-amber-800 border-amber-200",
+  };
   return (
     <Badge variant="outline" className={cn("ms-2", s.cls)}>
       {s.label}
@@ -200,6 +248,7 @@ function ActiveOrders({
   pendingOrderId,
   canTransition,
   canCancel,
+  canPrint,
   onTransition,
 }: {
   orders: CafeOrderDto[];
@@ -207,7 +256,11 @@ function ActiveOrders({
   pendingOrderId: string | null;
   canTransition: boolean;
   canCancel: boolean;
-  onTransition: (id: string, status: "PREPARING" | "READY" | "COMPLETED" | "CANCELLED") => void;
+  canPrint: boolean;
+  onTransition: (
+    id: string,
+    status: "PREPARING" | "READY" | "COMPLETED" | "CANCELLED",
+  ) => void;
 }) {
   if (pending && orders.length === 0) {
     return (
@@ -222,7 +275,9 @@ function ActiveOrders({
       <div className="grid gap-2 rounded-lg border bg-background px-4 py-12 text-center">
         <CoffeeIcon className="mx-auto size-8 text-muted-foreground" aria-hidden />
         <p className="font-medium">لا توجد طلبات نشطة</p>
-        <p className="text-sm text-muted-foreground">ستظهر طلبات الكافيه هنا بعد إنشائها من نقطة البيع أو شاشة الكافيه.</p>
+        <p className="text-sm text-muted-foreground">
+          ستظهر طلبات الكافيه هنا بعد إنشائها من نقطة البيع أو شاشة الكافيه.
+        </p>
       </div>
     );
   }
@@ -232,7 +287,9 @@ function ActiveOrders({
         <div key={o.id} className="rounded-lg border bg-background p-4">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="font-mono text-sm font-bold" dir="ltr">{o.orderNumber}</p>
+              <p className="font-mono text-sm font-bold" dir="ltr">
+                {o.orderNumber}
+              </p>
               <p className="text-xs text-muted-foreground">
                 {formatShortTime(o.createdAt)} · منذ {formatAge(o.ageSeconds)}
               </p>
@@ -241,32 +298,61 @@ function ActiveOrders({
               {CAFE_STATUS_LABELS[o.status]}
             </Badge>
           </div>
-          {o.customerName ? <p className="mt-1 text-sm font-medium">👤 {o.customerName}</p> : null}
+          {o.customerName ? (
+            <p className="mt-1 text-sm font-medium">👤 {o.customerName}</p>
+          ) : null}
           {o.invoiceNumber ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              فاتورة <span className="font-mono" dir="ltr">{o.invoiceNumber}</span>
+              فاتورة{" "}
+              <span className="font-mono" dir="ltr">
+                {o.invoiceNumber}
+              </span>
             </p>
           ) : null}
           <ul className="mt-3 divide-y">
             {o.items.map((it, i) => (
-              <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+              <li
+                key={i}
+                className="flex items-center justify-between gap-2 py-1.5 text-sm"
+              >
                 <span className="flex items-center gap-2">
                   <span className="font-bold tabular-nums">{it.quantity}×</span>
                   <span>
                     {it.productName}
-                    {it.notes ? <span className="block text-xs text-muted-foreground">ملاحظة: {it.notes}</span> : null}
+                    {it.notes ? (
+                      <span className="block text-xs text-muted-foreground">
+                        ملاحظة: {it.notes}
+                      </span>
+                    ) : null}
                   </span>
                 </span>
-                <span className="font-semibold tabular-nums">{formatEgp(it.lineTotal)}</span>
+                <span className="font-semibold tabular-nums">
+                  {formatEgp(it.lineTotal)}
+                </span>
               </li>
             ))}
           </ul>
           {o.note ? (
-            <p className="mt-2 rounded-md bg-muted px-2 py-1.5 text-sm text-muted-foreground">📝 {o.note}</p>
+            <p className="mt-2 rounded-md bg-muted px-2 py-1.5 text-sm text-muted-foreground">
+              📝 {o.note}
+            </p>
           ) : null}
           <div className="mt-3 flex items-center justify-between border-t pt-3">
             <p className="text-sm font-bold">{formatEgp(o.totalAmount)}</p>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {canPrint && o.saleId ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  title="طباعة الفاتورة"
+                  onClick={() =>
+                    window.open(`/print/cafe/${o.id}`, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  <PrinterIcon className="size-4" aria-hidden />
+                  طباعة
+                </Button>
+              ) : null}
               <TransitionButtons
                 status={o.status}
                 busy={pendingOrderId === o.id}
@@ -314,7 +400,12 @@ function TransitionButtons({
         </Button>
       ) : null}
       {showCancel ? (
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onTransition("CANCELLED")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          onClick={() => onTransition("CANCELLED")}
+        >
           إلغاء
         </Button>
       ) : null}
@@ -322,7 +413,15 @@ function TransitionButtons({
   );
 }
 
-function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () => void }) {
+function HistoryTable({
+  orders,
+  onLoad,
+  canPrint,
+}: {
+  orders: CafeOrderDto[];
+  onLoad: () => void;
+  canPrint: boolean;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-background">
       <table className="w-full text-sm">
@@ -334,25 +433,58 @@ function HistoryTable({ orders, onLoad }: { orders: CafeOrderDto[]; onLoad: () =
             <th className="px-3 py-2 text-start font-medium">الفاتورة</th>
             <th className="px-3 py-2 text-start font-medium">الإجمالي</th>
             <th className="px-3 py-2 text-start font-medium">الحالة</th>
+            <th className="px-3 py-2 text-start font-medium">إجراء</th>
           </tr>
         </thead>
         <tbody>
           {orders.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">لا يوجد سجل بعد.</td>
+              <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                لا يوجد سجل بعد.
+              </td>
             </tr>
           ) : (
             orders.map((o) => (
               <tr key={o.id} className="border-b last:border-0">
-                <td className="px-3 py-2 font-mono text-xs" dir="ltr">{o.orderNumber}</td>
-                <td className="px-3 py-2 text-muted-foreground">{formatShortTime(o.createdAt)}</td>
-                <td className="px-3 py-2">{o.items.map((i) => i.productName).join("، ")}</td>
-                <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">
+                <td className="px-3 py-2 font-mono text-xs" dir="ltr">
+                  {o.orderNumber}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {formatShortTime(o.createdAt)}
+                </td>
+                <td className="px-3 py-2">
+                  {o.items.map((i) => i.productName).join("، ")}
+                </td>
+                <td
+                  className="px-3 py-2 font-mono text-xs text-muted-foreground"
+                  dir="ltr"
+                >
                   {o.invoiceNumber || "—"}
                 </td>
-                <td className="px-3 py-2 font-semibold tabular-nums">{formatEgp(o.totalAmount)}</td>
+                <td className="px-3 py-2 font-semibold tabular-nums">
+                  {formatEgp(o.totalAmount)}
+                </td>
                 <td className="px-3 py-2">
-                  <Badge variant="outline" className={CAFE_STATUS_TONES[o.status]}>{CAFE_STATUS_LABELS[o.status]}</Badge>
+                  <Badge variant="outline" className={CAFE_STATUS_TONES[o.status]}>
+                    {CAFE_STATUS_LABELS[o.status]}
+                  </Badge>
+                </td>
+                <td className="px-3 py-2">
+                  {canPrint && o.saleId ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="طباعة الفاتورة"
+                      onClick={() =>
+                        window.open(`/print/cafe/${o.id}`, "_blank", "noopener,noreferrer")
+                      }
+                    >
+                      <PrinterIcon className="size-4" aria-hidden />
+                      طباعة
+                    </Button>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </td>
               </tr>
             ))
@@ -384,12 +516,16 @@ function OrderBuilder({
   const [note, setNote] = useState("");
   const [actionError, setActionError] = useState<string>();
   const [searching, setSearching] = useState(false);
-  const [payments, setPayments] = useState<Array<{ method: PaymentMethod; amount: number }>>([]);
+  const [payments, setPayments] = useState<
+    Array<{ method: PaymentMethod; amount: number }>
+  >([]);
   const [cashTendered, setCashTendered] = useState("");
   const [pending, startTransition] = useTransition();
 
   const total = lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0);
-  const cashPaid = payments.filter((p) => p.method === "CASH").reduce((s, p) => s + p.amount, 0);
+  const cashPaid = payments
+    .filter((p) => p.method === "CASH")
+    .reduce((s, p) => s + p.amount, 0);
   const paidTotal = payments.reduce((s, p) => s + p.amount, 0);
   const paymentsMatch = Math.abs(paidTotal - total) <= 0.01;
   const hasCash = payments.some((p) => p.method === "CASH");
@@ -446,7 +582,9 @@ function OrderBuilder({
 
   const setQty = (id: string, delta: number) => {
     setLines((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, quantity: Math.max(1, l.quantity + delta) } : l)),
+      prev.map((l) =>
+        l.id === id ? { ...l, quantity: Math.max(1, l.quantity + delta) } : l,
+      ),
     );
   };
 
@@ -479,7 +617,9 @@ function OrderBuilder({
       return;
     }
     if (!paymentValid) {
-      setActionError("تأكد من صحة طرق الدفع — يجب أن يساوي إجمالي المدفوعات إجمالي الطلب");
+      setActionError(
+        "تأكد من صحة طرق الدفع — يجب أن يساوي إجمالي المدفوعات إجمالي الطلب",
+      );
       return;
     }
     const idempotencyKey =
@@ -492,10 +632,13 @@ function OrderBuilder({
         items: lines.map((l) => ({
           productId: l.productId,
           quantity: l.quantity,
-          sugarLevel: l.supportsSugarOptions ? l.sugarLevel ?? undefined : undefined,
+          sugarLevel: l.supportsSugarOptions ? (l.sugarLevel ?? undefined) : undefined,
           notes: l.notes.trim() || undefined,
         })),
-        payments: payments.map((p) => ({ method: p.method, amount: Math.round(p.amount * 100) / 100 })),
+        payments: payments.map((p) => ({
+          method: p.method,
+          amount: Math.round(p.amount * 100) / 100,
+        })),
         cashTendered: cashTendered !== "" ? Number(cashTendered) : undefined,
         idempotencyKey,
         note: note.trim() || undefined,
@@ -510,7 +653,12 @@ function OrderBuilder({
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-background/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="طلب كافيه جديد">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-background/60 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="طلب كافيه جديد"
+    >
       <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border bg-background p-5 shadow-lg">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-lg font-bold">طلب كافيه جديد</h2>
@@ -523,7 +671,10 @@ function OrderBuilder({
         </p>
 
         {actionError ? (
-          <p className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+          <p
+            className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
             {actionError}
           </p>
         ) : null}
@@ -531,7 +682,10 @@ function OrderBuilder({
         <div className="mt-4 grid gap-2">
           <Label htmlFor="cafe-search">ابحث عن منتج</Label>
           <div className="relative">
-            <SearchIcon className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <SearchIcon
+              className="pointer-events-none absolute inset-s-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
             <Input
               id="cafe-search"
               className="ps-9"
@@ -552,10 +706,14 @@ function OrderBuilder({
                     <span>
                       {p.name}
                       {p.supportsSugarOptions ? (
-                        <span className="ms-2 text-xs text-muted-foreground">يحدد لها السكر</span>
+                        <span className="ms-2 text-xs text-muted-foreground">
+                          يحدد لها السكر
+                        </span>
                       ) : null}
                     </span>
-                    <span className="font-semibold tabular-nums">{formatEgp(p.sellingPrice)}</span>
+                    <span className="font-semibold tabular-nums">
+                      {formatEgp(p.sellingPrice)}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -574,30 +732,56 @@ function OrderBuilder({
                     <p className="text-sm font-medium">{l.name}</p>
                   </div>
                   <div className="flex items-center gap-1">
-                    <Button variant="outline" size="icon-xs" onClick={() => setQty(l.id, -1)} aria-label="إنقاص">
+                    <Button
+                      variant="outline"
+                      size="icon-xs"
+                      onClick={() => setQty(l.id, -1)}
+                      aria-label="إنقاص"
+                    >
                       <MinusIcon />
                     </Button>
-                    <span className="w-8 text-center font-bold tabular-nums">{l.quantity}</span>
-                    <Button variant="outline" size="icon-xs" onClick={() => setQty(l.id, 1)} aria-label="زيادة">
+                    <span className="w-8 text-center font-bold tabular-nums">
+                      {l.quantity}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="icon-xs"
+                      onClick={() => setQty(l.id, 1)}
+                      aria-label="زيادة"
+                    >
                       <PlusIcon />
                     </Button>
                   </div>
-                  <p className="w-20 text-end text-sm font-semibold tabular-nums">{formatEgp(l.unitPrice * l.quantity)}</p>
-                  <Button variant="ghost" size="icon-xs" onClick={() => removeLine(l.id)} aria-label="حذف">
+                  <p className="w-20 text-end text-sm font-semibold tabular-nums">
+                    {formatEgp(l.unitPrice * l.quantity)}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => removeLine(l.id)}
+                    aria-label="حذف"
+                  >
                     <Trash2Icon />
                   </Button>
                 </div>
                 <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
                   {l.supportsSugarOptions ? (
                     <div className="grid gap-1">
-                      <Label htmlFor={`sugar-${l.id}`} className="text-xs font-medium text-muted-foreground">
+                      <Label
+                        htmlFor={`sugar-${l.id}`}
+                        className="text-xs font-medium text-muted-foreground"
+                      >
                         درجة السكر
                       </Label>
                       <Select
                         value={l.sugarLevel ?? undefined}
                         onValueChange={(s) => setSugar(l.id, s as CafeSugarLevel)}
                       >
-                        <SelectTrigger id={`sugar-${l.id}`} className="h-7 text-xs" aria-label="اختر درجة السكر">
+                        <SelectTrigger
+                          id={`sugar-${l.id}`}
+                          className="h-7 text-xs"
+                          aria-label="اختر درجة السكر"
+                        >
                           <SelectValue placeholder="اختر درجة السكر" />
                         </SelectTrigger>
                         <SelectContent>
@@ -611,7 +795,10 @@ function OrderBuilder({
                     </div>
                   ) : null}
                   <div className="grid gap-1">
-                    <Label htmlFor={`notes-${l.id}`} className="text-xs font-medium text-muted-foreground">
+                    <Label
+                      htmlFor={`notes-${l.id}`}
+                      className="text-xs font-medium text-muted-foreground"
+                    >
                       ملاحظة
                     </Label>
                     <Input
@@ -627,7 +814,9 @@ function OrderBuilder({
             ))}
           </ul>
         ) : (
-          <p className="mt-3 text-sm text-muted-foreground">لم تُضف أصناف بعد — ابحث عن منتج وأضفه للطلب.</p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            لم تُضف أصناف بعد — ابحث عن منتج وأضفه للطلب.
+          </p>
         )}
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -636,13 +825,25 @@ function OrderBuilder({
             {customer ? (
               <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
                 <span>👤 {customer.name}</span>
-                <Button variant="ghost" size="sm" onClick={() => { setCustomer(null); setCustomerQuery(""); }}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setCustomer(null);
+                    setCustomerQuery("");
+                  }}
+                >
                   إزالة
                 </Button>
               </div>
             ) : (
               <>
-                <Input id="cafe-customer" value={customerQuery} onChange={(e) => runCustomerSearch(e.target.value)} placeholder="بحث بالاسم أو الهاتف" />
+                <Input
+                  id="cafe-customer"
+                  value={customerQuery}
+                  onChange={(e) => runCustomerSearch(e.target.value)}
+                  placeholder="بحث بالاسم أو الهاتف"
+                />
                 {customers.length > 0 ? (
                   <ul className="max-h-32 overflow-y-auto rounded-lg border bg-background">
                     {customers.map((c) => (
@@ -650,7 +851,11 @@ function OrderBuilder({
                         <button
                           type="button"
                           className="w-full px-3 py-2 text-start text-sm hover:bg-muted"
-                          onClick={() => { setCustomer(c); setCustomers([]); setCustomerQuery(""); }}
+                          onClick={() => {
+                            setCustomer(c);
+                            setCustomers([]);
+                            setCustomerQuery("");
+                          }}
                         >
                           {c.name}
                         </button>
@@ -663,7 +868,13 @@ function OrderBuilder({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="cafe-note">ملاحظة على الطلب</Label>
-            <Textarea id="cafe-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثال: حليب إضافي" />
+            <Textarea
+              id="cafe-note"
+              rows={2}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="مثال: حليب إضافي"
+            />
           </div>
         </div>
 
@@ -671,11 +882,18 @@ function OrderBuilder({
           <div className="flex items-center justify-between">
             <h3 className="font-heading text-sm font-bold">طريقة الدفع</h3>
             <p className="text-sm text-muted-foreground">
-              المطلوب: <span className="font-semibold tabular-nums">{formatEgp(total)}</span>
+              المطلوب:{" "}
+              <span className="font-semibold tabular-nums">{formatEgp(total)}</span>
             </p>
           </div>
 
-          <Button type="button" variant="outline" size="sm" className="w-full justify-between" onClick={payAllInCash}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full justify-between"
+            onClick={payAllInCash}
+          >
             <span>نقدي (دفع كامل)</span>
             {hasCash ? <CheckIcon className="size-4" aria-hidden /> : null}
           </Button>
@@ -730,7 +948,9 @@ function OrderBuilder({
               />
               {!Number.isNaN(tenderedNum) && cashTendered !== "" ? (
                 tenderedNum < cashPaid ? (
-                  <p className="text-sm text-destructive">المبلغ النقدي أقل من المستحق نقدًا</p>
+                  <p className="text-sm text-destructive">
+                    المبلغ النقدي أقل من المستحق نقدًا
+                  </p>
                 ) : (
                   <p className="text-sm font-medium">الباقي: {formatEgp(change)}</p>
                 )
@@ -739,7 +959,9 @@ function OrderBuilder({
           ) : null}
 
           {!paymentValid ? (
-            <p className="text-sm text-muted-foreground">حدد طريقة دفع واضبط المبلغ ليطابق إجمالي الطلب.</p>
+            <p className="text-sm text-muted-foreground">
+              حدد طريقة دفع واضبط المبلغ ليطابق إجمالي الطلب.
+            </p>
           ) : null}
         </div>
 
@@ -747,7 +969,10 @@ function OrderBuilder({
           <p className="text-lg font-bold">
             الإجمالي <span className="tabular-nums">{formatEgp(total)}</span>
           </p>
-          <Button onClick={submit} disabled={pending || lines.length === 0 || !paymentValid}>
+          <Button
+            onClick={submit}
+            disabled={pending || lines.length === 0 || !paymentValid}
+          >
             {pending && <Loader2Icon className="size-4 animate-spin" aria-hidden />}
             إرسال إلى الباريستا
           </Button>

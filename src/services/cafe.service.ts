@@ -7,6 +7,9 @@ import type { AuthUser } from "@/services/auth.service";
 import { recordAudit } from "@/services/audit.service";
 import { nextSequenceValue } from "@/models/sequence";
 import { ProductModel } from "@/models/product";
+// Side-effect import: registers the Category model so `populate("category")`
+// below resolves even when catalog.service is not part of the same bundle.
+import "@/models/category";
 import { CustomerModel } from "@/models/customer";
 import { createSaleWithSession } from "@/services/sales.service";
 import type { CafeSugarLevel } from "@/lib/cafe/sugar";

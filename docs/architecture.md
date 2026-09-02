@@ -366,14 +366,17 @@ Provides near-real-time barista UX with robust reconnect and deduplication behav
 ## 16. Thermal Printing Architecture
 
 ### Decision
-Use a **phased strategy**: HTML/CSS browser printing first, native **ESC/POS** printing as a later enhancement.
+Use a **phased strategy**: HTML/CSS browser printing first, native **ESC/POS** printing as a later enhancement. **Phase 1 (browser print) is implemented in Phase 8.**
 
-**Phase 1 — Browser print:**
-- A receipt preview/print view renders the **stored transaction** (never uncommitted cart state).
-- Fixed-width, RTL layouts for 58mm (~384px) and 80mm (~576px) thermal paper, with dedicated `@media print` styles.
-- Arabic RTL receipts use logical CSS, `dir="rtl"`, and a print-safe Arabic font with a system fallback.
+**Implemented — Browser print:**
+- A **`ReceiptViewModel`** is produced server-side (`src/services/receipt.service.ts`) from **persisted transaction data only** — never from uncommitted cart state. Sale receipts show stored `SaleItem` snapshot prices (a later catalog price change never alters printed totals). Café receipts show order items/notes/sugar levels plus financials from the café order's **linked immutable Sale**; customer-payment receipts show the single collection line "تحصيل دفعة من العميل".
+- Print loading is a dedicated server action (`src/actions/receipt-actions.ts`) that enforces per-receipt authorization (`receipts.print` + the relevant read permission) and returns the view model to the UI for preview.
+- Print routes `/print/sale/[id]`, `/print/cafe/[id]`, `/print/payment/[id]` are authenticated, `force-dynamic`, and `noindex`. They render `ReceiptDocument` (RTL, fixed width `58mm`/`80mm` via `?w=`), apply `@media print` styles, and auto-print once on mount (`AutoPrint`) plus a manual طباعة/إغلاق fallback. Invalid/unknown ids return an Arabic error page (IDOR-safe via `mongoose.isValidObjectId` + existence checks).
+- Receipts reuse the same invoice/order numbers as the stored transaction; **reprints never create a new sale**.
+- The store identity on receipts (name/address/phone/receipt footer) is a **configurable runtime config** (`src/lib/printing/config.ts`), not a hardcoded constant.
+- Fixed-width, RTL layouts for 58mm (~384px) and 80mm (~576px) thermal paper use logical CSS and `dir="rtl"`.
 
-**Phase 2 — ESC/POS (later):**
+**Deferred — ESC/POS (later):**
 - A server-side renderer outputs raw ESC/POS bytes for native thermal printing.
 - Receipt content is modeled once (width-aware) so HTML and ESC/POS derive from the same data.
 
@@ -384,7 +387,7 @@ Browser printing is fast to deliver and sufficient for many deployments; ESC/POS
 - Browser printing depends on the local browser; ESC/POS gives better native quality but more implementation effort.
 
 ### Impact
-Produces a reliable printing path that respects stored financial data and Arabic RTL.
+Produces a reliable printing path that respects stored financial data and Arabic RTL. Physical validation against real thermal printer hardware is still outstanding (see limitations).
 
 ---
 
@@ -583,7 +586,7 @@ The roadmap progresses from foundation to production, in dependency order. Each 
 | **5 — Customer Credit & Receivables** | Customer accounts, credit, collections | 0–4 | Customer; customer ledger; credit limits/approval; payment UI; balance reporting. |
 | **6 — Expenses & Accounting** | Expenses and accounting overview | 0–5 | Expense model + categories; consolidated accounting screens. ✅ **Implemented** |
 | **7 — Café / KDS** | Café orders + barista board | 0, 2 | CafeOrder state machine + history; cashier creation; barista board; SSE/outbox realtime; reconnect/reconcile. ✅ **Implemented** |
-| **8 — Printing** | Production thermal receipts | 0–7 | 58/80mm layouts; receipt models; preview; later ESC/POS. |
+| **8 — Printing** | Production thermal receipts | 0–7 | 58/80mm layouts; receipt models; preview; later ESC/POS. ✅ **Implemented** (Phase 1 browser print; physical printer validation outstanding) |
 | **9 — Online Store & Delivery** | Public store + fulfillment | 0–2, prior | Online catalog view; search; product pages; cart; checkout; online order lifecycle; reservation; delivery statuses; online payments / COD; tracking; cancellation/refund. |
 | **10 — Reports & Audit** | Complete reporting + auditability | all business | Daily/weekly/monthly/yearly reports; product/category/payment/cashier/supplier/customer/expense/inventory/expiry/profit; audit UI; optional summary collections. |
 | **11 — Production Hardening** | Operational confidence | all | Security headers/CSP; rate limiting; replica-set transactions in prod; backup/restore; index/perf tuning; observability; multi-branch readiness; accessibility/RTL audit. |

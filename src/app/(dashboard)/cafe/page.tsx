@@ -39,6 +39,7 @@ export default async function CafePage() {
       canTransition={user.permissions.has("cafe.orders.status")}
       canCancel={user.permissions.has("cafe.orders.cancel")}
       hasKds={user.permissions.has("cafe.kds.view")}
+      canPrint={user.permissions.has("receipts.print")}
     />
   );
 }

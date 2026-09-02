@@ -43,6 +43,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       payments={payments}
       canCollect={user.permissions.has("customer_payments.create")}
       canUpdate={user.permissions.has("customers.update")}
+      canPrintReceipts={user.permissions.has("receipts.print")}
     />
   );
 }

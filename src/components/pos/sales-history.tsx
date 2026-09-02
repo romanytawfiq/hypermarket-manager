@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { EyeIcon, RefreshCwIcon } from "lucide-react";
+import { EyeIcon, PrinterIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -21,13 +21,13 @@ import {
 import { listSalesAction } from "@/actions/sales-actions";
 import { paymentMethodLabel } from "@/lib/sales/constants";
 import type { SaleDto } from "@/services/sales.service";
-import { Receipt } from "@/components/pos/receipt";
+import { SaleReceiptDialog } from "@/components/printing/sale-receipt-dialog";
 
 function formatEgp(n: number): string {
   return `${Math.round(n).toLocaleString("ar-EG")} ج.م`;
 }
 
-export function SalesHistory() {
+export function SalesHistory({ canPrint = true }: { canPrint?: boolean }) {
   const [sales, setSales] = useState<SaleDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SaleDto | null>(null);
@@ -102,10 +102,25 @@ export function SalesHistory() {
                   <TableCell className="font-semibold">{formatEgp(s.totalAmount)}</TableCell>
                   <TableCell>{s.payments.map((p) => paymentMethodLabel(p.method)).join("، ")}</TableCell>
                   <TableCell className="text-end">
-                    <Button variant="outline" size="sm" onClick={() => setSelected(s)}>
-                      <EyeIcon className="size-4" aria-hidden />
-                      عرض
-                    </Button>
+                    <div className="flex justify-end gap-1.5">
+                      {canPrint ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          title="طباعة الفاتورة"
+                          onClick={() =>
+                            window.open(`/print/sale/${s.id}`, "_blank", "noopener,noreferrer")
+                          }
+                        >
+                          <PrinterIcon className="size-4" aria-hidden />
+                          طباعة
+                        </Button>
+                      ) : null}
+                      <Button variant="outline" size="sm" onClick={() => setSelected(s)}>
+                        <EyeIcon className="size-4" aria-hidden />
+                        عرض
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -121,7 +136,7 @@ export function SalesHistory() {
             <DialogDescription>عرض تفاصيل الفاتورة وطباعتها</DialogDescription>
           </DialogHeader>
           {selected ? (
-            <Receipt sale={selected} onClose={() => setSelected(null)} />
+            <SaleReceiptDialog saleId={selected.id} canPrint={canPrint} onClose={() => setSelected(null)} />
           ) : null}
         </DialogContent>
       </Dialog>

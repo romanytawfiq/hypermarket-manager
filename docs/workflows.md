@@ -682,3 +682,29 @@ Physical Cash Flow: In vs Out
 ``
 
 Period figures honor the chosen range; receivables/payables are current outstanding balances. Cash flow strictly separates physical cash from card/wallet/Instapay (BR-065).
+
+---
+
+# 24. Receipt Printing Workflow (Phase 8)
+
+```text
+Sale / Café Order / Customer Payment Stored
+↓
+Actor Opens Receipt Preview (reprint or after-sale dialog)
+↓
+Server Action: load ReceiptViewModel (persisted transaction only)
+↓
+Server-Side Permission Check (receipts.print + domain read)
+↓
+IDOR-Safe Lookup (valid id + existing record)
+↓
+Print Page /print/{sale|cafe|payment}/[id]?w=58mm|80mm
+↓
+Auto-print + Manual "طباعة" / "إغلاق"
+```
+
+- Sale receipts print stored `SaleItem` **snapshot prices** — a later catalog change never alters printed totals.
+- Café receipts print the order items with sugar level and note plus the financial totals of the linked **immutable Sale** (no linked Sale → "لا توجد فاتورة مرتبطة بهذا الطلب").
+- Payment receipts print the stored payment record (method, amount) and customer name.
+- Reprints reuse the stored invoice/order number and **never create a new sale**.
+- Print routes are authenticated, `force-dynamic`, and `noindex`; anonymous actors are redirected to login.

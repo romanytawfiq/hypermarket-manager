@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BanknoteIcon, Loader2Icon } from "lucide-react";
+import { BanknoteIcon, Loader2Icon, PrinterIcon } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -44,12 +44,15 @@ export function CustomerDetail({
   payments,
   canCollect,
   canUpdate,
+  canPrintReceipts,
 }: {
   customer: CustomerDto;
   ledger: CustomerLedgerDto[];
   payments: CustomerPaymentDto[];
   canCollect: boolean;
   canUpdate: boolean;
+  /** `receipts.print` — shows the إيصال سداد print action per payment. */
+  canPrintReceipts: boolean;
 }) {
   const router = useRouter();
   const [payOpen, setPayOpen] = useState(false);
@@ -122,7 +125,11 @@ export function CustomerDetail({
         ))}
       </div>
 
-      {filter === "ledger" ? <LedgerTable ledger={ledger} /> : <PaymentsTable payments={payments} />}
+      {filter === "ledger" ? (
+        <LedgerTable ledger={ledger} />
+      ) : (
+        <PaymentsTable payments={payments} canPrintReceipts={canPrintReceipts} />
+      )}
 
       {canUpdate ? (
         <p className="text-xs text-muted-foreground">
@@ -178,7 +185,13 @@ function LedgerTable({ ledger }: { ledger: CustomerLedgerDto[] }) {
   );
 }
 
-function PaymentsTable({ payments }: { payments: CustomerPaymentDto[] }) {
+function PaymentsTable({
+  payments,
+  canPrintReceipts,
+}: {
+  payments: CustomerPaymentDto[];
+  canPrintReceipts: boolean;
+}) {
   if (payments.length === 0) {
     return <EmptyTable message="لا توجد مدفوعات مسجلة بعد" />;
   }
@@ -192,6 +205,7 @@ function PaymentsTable({ payments }: { payments: CustomerPaymentDto[] }) {
             <TableHead>الطريقة</TableHead>
             <TableHead>المبلغ</TableHead>
             <TableHead>المسجِّل</TableHead>
+            {canPrintReceipts ? <TableHead className="text-end">إجراء</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -202,6 +216,21 @@ function PaymentsTable({ payments }: { payments: CustomerPaymentDto[] }) {
               <TableCell>{PAYMENT_METHOD_LABELS[p.method as PaymentMethod] ?? p.method}</TableCell>
               <TableCell className="font-semibold text-emerald-700">{formatEgp(p.amount)}</TableCell>
               <TableCell className="text-muted-foreground">{p.createdBy}</TableCell>
+              {canPrintReceipts ? (
+                <TableCell className="text-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title="طباعة إيصال السداد"
+                    onClick={() =>
+                      window.open(`/print/payment/${p.id}`, "_blank", "noopener,noreferrer")
+                    }
+                  >
+                    <PrinterIcon className="size-4" aria-hidden />
+                    طباعة
+                  </Button>
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
         </TableBody>

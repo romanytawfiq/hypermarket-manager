@@ -5,6 +5,10 @@ import { requirePermission } from "@/services/authorization.service";
 import type { AuthUser } from "@/services/auth.service";
 import { recordAudit } from "@/services/audit.service";
 import { ProductModel } from "@/models/product";
+// Side-effect imports: register the Category/Brand models so the
+// product-list populates below resolve in any bundle that loads this service.
+import "@/models/category";
+import "@/models/brand";
 import { InventoryStateModel } from "@/models/inventory-state";
 import {
   StockMovementModel,

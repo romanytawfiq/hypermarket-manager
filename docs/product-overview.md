@@ -142,7 +142,7 @@ Orders and barista workflow.
 
 ## 9. Printing
 
-Receipts and printable business documents.
+Receipts and printable business documents. Production Arabic RTL thermal receipts (58/80mm) for sales, café orders (with linked invoice), and customer payments — server-derived from stored transactions, permission-controlled, reprint-safe.
 
 ## 10. Online Store
 

@@ -14,5 +14,5 @@ export default async function SalesPage() {
     redirect("/");
   }
 
-  return <SalesHistory />;
+  return <SalesHistory canPrint={user.permissions.has("receipts.print")} />;
 }
