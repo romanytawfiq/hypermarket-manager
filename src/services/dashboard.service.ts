@@ -157,7 +157,7 @@ async function getPurchaseSummary(from: Date | null, to: Date | null) {
       { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
     ]),
     SupplierPaymentModel.aggregate([
-      { $match: { ...(Object.keys(dateMatch).length ? { paymentDate: dateMatch } : {}), method: "نقدي" } },
+      { $match: { ...(Object.keys(dateMatch).length ? { paymentDate: dateMatch } : {}), method: "CASH" } },
       { $group: { _id: null, amount: { $sum: "$amount" } } },
     ]),
   ]);

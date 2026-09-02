@@ -309,26 +309,30 @@ describe("Phase 9 — Online store & delivery", () => {
       if (forbidden instanceof AppError) expect(forbidden.code).toBe("FORBIDDEN");
     });
 
-    it("walks the full admin ladder and rejects illegal transitions", async () => {
+    it("walks the admin ladder up to OUT_FOR_DELIVERY and rejects bare DELIVERED", async () => {
       const pid = await makeProduct({ name: "منتج سلم", purchaseCost: 10, sellingPrice: 20, stock: 5 });
       const { order } = await createOnlineOrder(
         checkoutInput({ items: [{ productId: pid, quantity: 1 }], idempotencyKey: crypto.randomUUID() }),
       );
 
-      // PENDING → CONFIRMED → PREPARING → READY_FOR_DELIVERY → OUT_FOR_DELIVERY → DELIVERED
-      const steps: OnlineOrderDto["status"][] = ["CONFIRMED", "PREPARING", "READY_FOR_DELIVERY", "OUT_FOR_DELIVERY", "DELIVERED"];
+      // PENDING → CONFIRMED → PREPARING → READY_FOR_DELIVERY → OUT_FOR_DELIVERY.
+      // DELIVERED must NOT be reachable via the generic transition: it would mark
+      // the order terminal while no financial Sale is posted and reservations are
+      // never fulfilled. DELIVERED is only valid via collectCodAndDeliver /
+      // deliverPaidOnlineOrder (both post the Sale).
+      const steps: OnlineOrderDto["status"][] = ["CONFIRMED", "PREPARING", "READY_FOR_DELIVERY", "OUT_FOR_DELIVERY"];
       let state = order;
       for (const s of steps) {
         const res = await transitionOnlineOrder(manager, { orderId: state.id, targetStatus: s });
         expect(res.status).toBe(s);
         state = res;
       }
-      expect(state.statusHistory.length).toBe(6); // initial PENDING + 5 transitions
+      expect(state.statusHistory.length).toBe(5); // initial PENDING + 4 transitions
 
-      // Illegal: DELIVERED is terminal.
+      // A bare DELIVERED transition is rejected (financial integrity guard).
       let caught: unknown;
       try {
-        await transitionOnlineOrder(manager, { orderId: order.id, targetStatus: "PENDING" });
+        await transitionOnlineOrder(manager, { orderId: order.id, targetStatus: "DELIVERED" });
       } catch (e) {
         caught = e;
       }

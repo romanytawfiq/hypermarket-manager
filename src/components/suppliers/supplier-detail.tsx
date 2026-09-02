@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import type { SupplierDto } from "@/services/supplier.service";
 import type { PurchaseDto } from "@/services/purchasing.service";
 import type { ProductDto } from "@/services/catalog.service";
+import { paymentMethodLabel } from "@/lib/sales/constants";
 import {
   CreatePurchaseForm,
   PaySupplierForm,
@@ -301,7 +302,7 @@ function PaymentsTable({
           {payments.map((p) => (
             <TableRow key={p.id}>
               <TableCell className="text-muted-foreground">{new Date(p.paymentDate).toLocaleDateString("ar-EG")}</TableCell>
-              <TableCell>{p.method}</TableCell>
+              <TableCell>{paymentMethodLabel(p.method)}</TableCell>
               <TableCell className="font-semibold text-emerald-700">{formatEgp(p.amount)}</TableCell>
               <TableCell className="text-muted-foreground">{p.createdBy}</TableCell>
             </TableRow>

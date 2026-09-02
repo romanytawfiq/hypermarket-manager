@@ -63,7 +63,10 @@ export interface OnlineActionState {
   paymentSessionId?: string;
 }
 
-function parse<T>(schema: z.ZodType<T>, input: unknown): { ok: true; data: T } | { ok: false; error: string } {
+function parse<T>(
+  schema: z.ZodType<T>,
+  input: unknown,
+): { ok: true; data: T } | { ok: false; error: string } {
   const result = schema.safeParse(input);
   if (!result.success) {
     return { ok: false, error: result.error.issues[0]?.message ?? "بيانات غير صحيحة" };
@@ -81,7 +84,9 @@ export async function listOnlineProductsAction(): Promise<OnlineProductDto[]> {
   }
 }
 
-export async function getOnlineProductAction(id: string): Promise<OnlineProductDto | null> {
+export async function getOnlineProductAction(
+  id: string,
+): Promise<OnlineProductDto | null> {
   try {
     return await getOnlineProduct(id);
   } catch {
@@ -113,14 +118,19 @@ export async function getOnlineCategoriesAction(): Promise<
 
 /* ---- Checkout ---- */
 
-export async function createOnlineOrderAction(input: OnlineCheckoutInput): Promise<OnlineActionState> {
+export async function createOnlineOrderAction(
+  input: OnlineCheckoutInput,
+): Promise<OnlineActionState> {
   if (await isRateLimited()) {
     return { error: "محاولات كثيرة. حاول مرة أخرى بعد قليل" };
   }
+
   const p = parse(onlineCheckoutSchema, input);
+
   if (!p.ok) return { error: p.error };
   try {
     const result = await createOnlineOrder(p.data);
+
     return {
       order: result.order,
       trackingToken: result.trackingToken,
@@ -128,6 +138,7 @@ export async function createOnlineOrderAction(input: OnlineCheckoutInput): Promi
       paymentSessionId: result.paymentSessionId,
     };
   } catch (error) {
+    console.log(error);
     return { error: resolveError(error).userMessage };
   }
 }
@@ -158,7 +169,9 @@ export async function kashierRedirectStatusAction(searchString: string): Promise
 }
 
 /** Delivers a paid-online order (posts the non-cash Sale). Requires the delivery permission set. */
-export async function deliverPaidOnlineOrderAction(orderId: string): Promise<OnlineActionState> {
+export async function deliverPaidOnlineOrderAction(
+  orderId: string,
+): Promise<OnlineActionState> {
   try {
     const user = await getCurrentUser();
     const order = await deliverPaidOnlineOrder(user, orderId);
@@ -172,7 +185,9 @@ export async function deliverPaidOnlineOrderAction(orderId: string): Promise<Onl
 
 /* ---- Tracking ---- */
 
-export async function trackOnlineOrderAction(input: OnlineTrackOrderInput): Promise<OnlineActionState> {
+export async function trackOnlineOrderAction(
+  input: OnlineTrackOrderInput,
+): Promise<OnlineActionState> {
   const p = parse(onlineTrackOrderSchema, input);
   if (!p.ok) return { error: p.error };
   try {
@@ -185,7 +200,9 @@ export async function trackOnlineOrderAction(input: OnlineTrackOrderInput): Prom
 
 /* ---- Admin reads ---- */
 
-export async function listOnlineOrdersAction(opts?: { status?: string }): Promise<OnlineOrderDto[]> {
+export async function listOnlineOrdersAction(opts?: {
+  status?: string;
+}): Promise<OnlineOrderDto[]> {
   try {
     return await listOnlineOrders(await getCurrentUser(), opts);
   } catch {
@@ -224,7 +241,9 @@ export async function listDeliveryOrdersAction(): Promise<OnlineOrderDto[]> {
 
 /* ---- Mutations ---- */
 
-export async function transitionOnlineOrderAction(input: OnlineTransitionInput): Promise<OnlineActionState> {
+export async function transitionOnlineOrderAction(
+  input: OnlineTransitionInput,
+): Promise<OnlineActionState> {
   const p = parse(onlineTransitionSchema, input);
   if (!p.ok) return { error: p.error };
   try {
@@ -237,7 +256,9 @@ export async function transitionOnlineOrderAction(input: OnlineTransitionInput):
   }
 }
 
-export async function assignOnlineOrderAction(input: OnlineAssignInput): Promise<OnlineActionState> {
+export async function assignOnlineOrderAction(
+  input: OnlineAssignInput,
+): Promise<OnlineActionState> {
   const p = parse(onlineAssignSchema, input);
   if (!p.ok) return { error: p.error };
   try {
@@ -251,7 +272,9 @@ export async function assignOnlineOrderAction(input: OnlineAssignInput): Promise
 }
 
 /** Collects COD and delivers the order, posting the financial Sale (shift-bound). */
-export async function collectCodAndDeliverAction(orderId: string): Promise<OnlineActionState> {
+export async function collectCodAndDeliverAction(
+  orderId: string,
+): Promise<OnlineActionState> {
   try {
     const user = await getCurrentUser();
     const order = await collectCodAndDeliver(user, orderId);

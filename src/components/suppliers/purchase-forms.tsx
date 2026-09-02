@@ -16,6 +16,7 @@ import {
   createSupplierPaymentAction,
   createSupplierReturnAction,
 } from "@/actions/purchasing-actions";
+import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/sales/constants";
 
 function ActionError({ message }: { message?: string }) {
   if (!message) return null;
@@ -210,12 +211,10 @@ export function CreatePurchaseForm({
 
 /* ---------------- Pay Supplier ---------------- */
 
-const PAY_METHODS = ["نقدي", "تحويل بنكي", "شيك", "فودافون كاش", "إنستاباي"];
-
 export function PaySupplierForm({ supplierId, onSuccess }: { supplierId: string; onSuccess: () => void }) {
   const router = useRouter();
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState(PAY_METHODS[0] ?? "نقدي");
+  const [method, setMethod] = useState<PaymentMethod>("CASH");
   const [actionError, setActionError] = useState<string>();
   const [pending, startTransition] = useTransition();
 
@@ -230,6 +229,9 @@ export function PaySupplierForm({ supplierId, onSuccess }: { supplierId: string;
         supplierId,
         amount: Number(amount),
         method,
+        // A stable per-form key prevents duplicate posting if a retry happens
+        // after the request succeeded server-side but the response was lost.
+        idempotencyKey: crypto.randomUUID(),
       });
       if (result.success) {
         toast.success("تم تسجيل الدفعة");
@@ -257,14 +259,14 @@ export function PaySupplierForm({ supplierId, onSuccess }: { supplierId: string;
       </div>
       <div className="grid gap-2">
         <Label>طريقة الدفع</Label>
-        <Select value={method} onValueChange={(v) => setMethod(v ?? "نقدي")}>
+        <Select value={method} onValueChange={(v) => setMethod((v as PaymentMethod) ?? "CASH")}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PAY_METHODS.map((m) => (
+            {PAYMENT_METHODS.map((m) => (
               <SelectItem key={m} value={m}>
-                {m}
+                {PAYMENT_METHOD_LABELS[m]}
               </SelectItem>
             ))}
           </SelectContent>

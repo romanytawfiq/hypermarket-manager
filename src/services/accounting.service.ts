@@ -22,15 +22,16 @@ import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/sales/constants";
  * Cash flow strictly separates physical cash (CASH) from card / wallet /
  * Instapay (BR-008, §28): only `CASH` payments and CASH_IN/CASH_OUT movements
  * affect the physical-cash totals. Supplier payments are classed as cash only
- * when their method label is the Arabic cash label ("نقدي").
+ * when their method is the canonical `CASH` enum token (the same closed set used
+ * by sales / expenses / customer payments).
  *
  * Receivables / payables are current outstanding balances across all history
  * (ledger-derived). Period figures (sales, purchases, expenses, cash flow) are
  * scoped to the requested date range.
  */
 
-/** Arabic cash payment label — must match what cash supplier payments record. */
-const CASH_METHOD_LABEL = "نقدي";
+/** The canonical cash payment-method token recorded by cash supplier payments. */
+const CASH_METHOD_TOKEN = "CASH";
 
 export interface AccountingOverview {
   from: string | null;
@@ -116,7 +117,7 @@ export async function getAccountingOverview(
       { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
     ]),
     SupplierPaymentModel.aggregate([
-      { $match: { ...(hasRange ? { paymentDate: dateMatch } : {}), method: CASH_METHOD_LABEL } },
+      { $match: { ...(hasRange ? { paymentDate: dateMatch } : {}), method: CASH_METHOD_TOKEN } },
       { $group: { _id: null, amount: { $sum: "$amount" } } },
     ]),
   ]);

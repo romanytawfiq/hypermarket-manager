@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2Icon } from "lucide-react";
-import { onlineCheckoutSchema } from "@/lib/validations/online-store";
+import { onlineCheckoutFormSchema } from "@/lib/validations/online-store";
 import { createOnlineOrderAction } from "@/actions/online-store-actions";
 import { useCartStore, type CartLine } from "@/store/cart";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatEgp } from "@/lib/format";
 
-const resolver = zodResolver(onlineCheckoutSchema) as unknown as Resolver<CheckoutValues>;
+// Validates only the fields bound to the form (customer + delivery address).
+// `items`/`paymentMethod`/`idempotencyKey` are supplied on submit and validated
+// authoritatively by the server Action against the full checkout schema, so they
+// must NOT be required by the client resolver (a missing-field validation error
+// here previously stopped the submit silently for both COD and ONLINE).
+const resolver = zodResolver(onlineCheckoutFormSchema) as unknown as Resolver<CheckoutValues>;
 
 interface CheckoutValues {
   customerName: string;
@@ -58,6 +63,20 @@ export function CheckoutForm({
   const clear = useCartStore((s) => s.clear);
   const router = useRouter();
 
+  // One idempotency key for the whole checkout session. Regenerating it on every
+  // submit would defeat server-side de-duplication: if an order succeeds server-side
+  // but the response is lost (timeout / connection reset), a retry with a fresh key
+  // would create a duplicate order. Holding the same key (initialized once per mount)
+  // lets the server return the already-created order instead (idempotent replay).
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+
+  // Blocks duplicate submission: once a submit starts (especially in-flight for
+  // an ONLINE redirect) a second click/Enter must not place another order.
+  const [submitted, setSubmitted] = useState(false);
+  // Set true only when we actually navigate away to the payment gateway, so the
+  // `finally` block does not re-arm the submitted guard during the redirect.
+  const [redirected, setRedirected] = useState(false);
+
   const {
     register,
     handleSubmit,
@@ -81,58 +100,71 @@ export function CheckoutForm({
   });
 
   const onSubmit = handleSubmit((values) => {
+    if (submitted || pending) return;
+    setSubmitted(true);
     setActionError(undefined);
     startTransition(async () => {
-      const result = await createOnlineOrderAction({
-        customerName: values.customerName,
-        customerEmail: values.customerEmail,
-        customerPhone: values.customerPhone,
-        deliveryAddress: {
-          fullName: values.deliveryAddress.fullName,
-          phone: values.deliveryAddress.phone,
-          city: values.deliveryAddress.city,
-          area: values.deliveryAddress.area,
-          street: values.deliveryAddress.street,
-          landmark: values.deliveryAddress.landmark ?? "",
-          notes: values.deliveryAddress.notes ?? "",
-        },
-        items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
-        paymentMethod,
-        idempotencyKey: crypto.randomUUID(),
-      });
+      try {
+        const result = await createOnlineOrderAction({
+          customerName: values.customerName,
+          customerEmail: values.customerEmail,
+          customerPhone: values.customerPhone,
+          deliveryAddress: {
+            fullName: values.deliveryAddress.fullName,
+            phone: values.deliveryAddress.phone,
+            city: values.deliveryAddress.city,
+            area: values.deliveryAddress.area,
+            street: values.deliveryAddress.street,
+            landmark: values.deliveryAddress.landmark ?? "",
+            notes: values.deliveryAddress.notes ?? "",
+          },
+          items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+          paymentMethod,
+          idempotencyKey,
+        });
 
-      if (result.order && result.paymentSessionUrl) {
-        // Online payment: keep the tracking secret in sessionStorage so the
-        // Kashier redirect return page can link back to tracking. The cart is
-        // cleared only after payment is actually confirmed.
-        sessionStorage.setItem(
-          "nexa-pending-online",
-          JSON.stringify({
-            orderNumber: result.order.orderNumber,
-            token: result.trackingToken ?? "",
-          }),
-        );
-        window.location.assign(result.paymentSessionUrl);
-        return;
-      }
-
-      if (result.order) {
-        // Order persisted. For COD this is success; for ONLINE it means the
-        // electronic payment session could not be initialized (the order stays
-        // unpaid — no fabricated payment success).
-        clear();
-        const token = result.trackingToken ?? "";
-        if (paymentMethod === "ONLINE") {
-          setActionError(
-            "تم تسجيل طلبك، لكن تعذّر إنشاء جلسة الدفع الإلكتروني. أكمل دفعك لاحقًا أو تواصل مع المتجر.",
+        if (result.order && result.paymentSessionUrl) {
+          // Online payment: keep the tracking secret in sessionStorage so the
+          // Kashier redirect return page can link back to tracking. The cart is
+          // cleared only after payment is actually confirmed.
+          sessionStorage.setItem(
+            "nexa-pending-online",
+            JSON.stringify({
+              orderNumber: result.order.orderNumber,
+              token: result.trackingToken ?? "",
+            }),
           );
+          setRedirected(true);
+          window.location.assign(result.paymentSessionUrl);
           return;
         }
-        router.push(`/store/track?orderNumber=${encodeURIComponent(result.order.orderNumber)}&token=${encodeURIComponent(token)}`);
-        return;
-      }
 
-      setActionError(result.error ?? "حدث خطأ غير متوقع");
+        if (result.order) {
+          // Order persisted. For COD this is success; for ONLINE it means the
+          // electronic payment session could not be initialized (the order stays
+          // unpaid — no fabricated payment success).
+          clear();
+          const token = result.trackingToken ?? "";
+          if (paymentMethod === "ONLINE") {
+            setActionError(
+              "تم تسجيل طلبك، لكن تعذّر إنشاء جلسة الدفع الإلكتروني. أكمل دفعك لاحقًا أو تواصل مع المتجر.",
+            );
+            return;
+          }
+          setRedirected(true);
+          router.push(`/store/track?orderNumber=${encodeURIComponent(result.order.orderNumber)}&token=${encodeURIComponent(token)}`);
+          return;
+        }
+
+        setActionError(result.error ?? "حدث خطأ غير متوقع");
+      } finally {
+        // Re-arm the submit guard unless we navigated away (redirect/cart-free
+        // success unmounts the component; the guard reset there is harmless but
+        // we avoid trusting a stale value by skipping the reset once redirected).
+        if (!redirected) {
+          setSubmitted(false);
+        }
+      }
     });
   });
 
@@ -264,9 +296,15 @@ export function CheckoutForm({
         </div>
       </section>
 
-      <Button type="submit" className="w-full" disabled={pending} size="lg">
+      <Button type="submit" className="w-full" disabled={pending || submitted} size="lg">
         {pending ? <Loader2Icon className="size-4 animate-spin" aria-hidden /> : null}
-        {paymentMethod === "ONLINE" ? "المتابعة إلى الدفع الإلكتروني" : "تأكيد الطلب"}
+        {pending
+          ? paymentMethod === "ONLINE"
+            ? "جارٍ إنشاء جلسة الدفع الإلكتروني…"
+            : "جارٍ تسجيل الطلب…"
+          : paymentMethod === "ONLINE"
+            ? "المتابعة إلى الدفع الإلكتروني"
+            : "تأكيد الطلب"}
       </Button>
       <Link href="/store/cart" className="block text-center text-sm text-muted-foreground hover:text-foreground">
         العودة إلى السلة

@@ -262,10 +262,146 @@ script-file execution is blocked by the shell policy.
 ## 8. Outstanding Deferred Work (next iterations)
 
 1. Rotate the old Atlas credentials if they ever leaked outside this working tree.
-2. Implement rate limiting/lockout on the login action before public exposure.
-3. Replace `purchasing.service.ts` `nextNumber()` with the atomic sequence utility.
+2. ~~Implement rate limiting/lockout on the login action before public exposure~~ — **FIXED in Phase 10 audit** (see §9).
+3. ~~Replace `purchasing.service.ts` `nextNumber()` with the atomic sequence utility~~ — **FIXED in Phase 10 audit** (see §9).
 4. Kill the two N+1 hot paths (`listProducts`, shift list) with batch methods.
-5. Add ARIA tab patterns to customer/supplier detail, and focus-trapping to the
-   cafe order builder.
+5. Add ARIA tab patterns to customer/supplier detail, and focus-trapping to the cafe order builder.
 6. Per-table `aria-label`s across data tables.
 7. Add explicit `AUTH_SECRET` requirement in production.
+
+---
+
+## 9. Phase 10 — Financial-Integrity & Security Hardening Audit (2026-09-02)
+
+A follow-up engineering audit focused on financial integrity, security, and
+validation across the online-store / delivery financial boundary, the online
+storefront, authentication, purchasing, and shift read paths. The findings
+below were **verified against source and fixed in this pass**. Regression gate
+after fixes — all green: `eslint` clean, `vitest run` **226 passed / 23 files**,
+`next build` (typecheck) passes.
+
+### 9.1 FIN-001 (HIGH, fixed) — COD order could be marked DELIVERED without posting the Sale
+
+**Finding:** `transitionOnlineOrder` in `src/services/online-store.service.ts`
+allowed a generic `OUT_FOR_DELIVERY → DELIVERED` transition under
+`online.orders.manage`. An operator holding that permission (but not
+`sales.create`) could mark a COD order DELIVERED — a terminal state — while:
+no financial Sale was ever posted (COD cash never entered accounting), and the
+inventory reservations were never released/fulfilled. Because `DELIVERED` is
+terminal, `collectCodAndDeliver` could then never run, permanently losing the
+recorded payment. The bug was "encoded" into `online-store.test.ts` (the admin
+ladder walked to DELIVERED via the generic transition).
+
+**Fix:**
+- Removed `DELIVERED` from `ALLOWED_NEXT.OUT_FOR_DELIVERY` so the only paths to
+  DELIVERED are `collectCodAndDeliver` (COD) and `deliverPaidOnlineOrder`
+  (ONLINE) — both of which create the Sale + fulfill reservations in one
+  transaction (`online-store.service.ts`).
+- Admin dashboard no longer exposes a bare "تقدم" for `OUT_FOR_DELIVERY`; it now
+  invokes the financial deliver action ("تسليم + تسجيل البيع")
+  (`online-orders-admin.tsx`).
+- Corrected `online-store.test.ts` to assert that a bare DELIVERED transition is
+  rejected (CONFLICT), and added no regression gap.
+
+### 9.2 HIGH (fixed) — Storefront checkout regenerated its idempotency key every submit
+
+**Finding:** `checkout-form.tsx` called `crypto.randomUUID()` inside the submit
+handler, generating a fresh key on every attempt. The server-side idempotency
+lookup (`online-store.service.ts` by `idempotencyKey`) could therefore never dedupe:
+if an order succeeded server-side but the response was lost (timeout/reset), the
+retry created a duplicate order. It also ignored the already-passing guard against
+double-click between rapid retries.
+
+**Fix:** The idempotency key is now generated once per form mount and reused for
+the whole checkout session, so a retry returns the existing order (idempotent
+replay) instead of double-committing.
+
+### 9.3 HIGH (fixed) — Login had no rate limiting
+
+**Finding:** `loginAction` (`src/actions/auth-actions.ts`) performed
+unthrottled bcrypt-12 verification on every attempt. An attacker could brute-force
+or credential-stuff staff accounts, and cheaply exhaust CPU (effective DoS). The
+existing in-memory limiter (`src/lib/rate-limit.ts`) was used only by online order
+creation, not login (previously S1).
+
+**Fix:** `loginAction` now calls `isRateLimited()` up-front and returns a safe
+Arabic message when the caller exceeds the per-client window.
+
+### 9.4 HIGH (fixed) — Supplier payments: free-form method + no idempotency (double-posting)
+
+**Finding:** `supplierPaymentSchema.method` was a free-form `string` (max 60), and
+the Pay Supplier form sent Arabic labels (`نقدي`, `تحويل بنكي`…). These were stored
+verbatim, so supplier cash payments never matched the canonical `CASH` token used
+by `isCashMethod` and by every other payment record — supplier cash payments were
+excluded from accounting/dashboard cash aggregations, and the method was not a
+closed enum. Separately, supplier payments had no `idempotencyKey`, so a retry after
+a lost response could double-post money.
+
+**Fix:**
+- `supplierPaymentSchema.method` now validates against `z.enum(PAYMENT_METHODS)`
+  and requires an `idempotencyKey` (`validations/purchasing.ts`).
+- `SupplierPaymentModel` stores the enum token and adds a unique sparse index on
+  `idempotencyKey` (`models/supplier-payment.ts`).
+- `createSupplierPayment` is now idempotent (replays return the existing payment)
+  (`purchasing.service.ts`); the immediate-cash purchase path records `CASH`.
+- The Pay Supplier form sends enum tokens + Arabic labels via the shared
+  `PAYMENT_METHOD_LABELS` map (`purchase-forms.tsx`); the supplier detail table
+  renders labels via `paymentMethodLabel`.
+- **Root-cause follow-through:** `accounting.service.ts` and `dashboard.service.ts`
+  aggregated supplier cash by matching the Arabic label `"نقدي"`; both now match the
+  canonical `"CASH"` token (this was the original reason the free-form string broke).
+- Added a regression test: replaying a supplier-payment key never double-posts.
+
+### 9.5 HIGH/MEDIUM (fixed) — Purchasing/returns numbering race (was D1)
+
+**Finding:** `purchasing.service.ts` `nextNumber()` used `countDocuments() + 1`,
+which is racy under concurrency and could produce duplicate purchase/return numbers
+(they are not unique-indexed, so collisions were silent). Sales/café/expenses already
+used the atomic `nextSequenceValue`.
+
+**Fix:** `nextNumber()` now delegates to `nextSequenceValue`, passing the transaction
+session so allocation and the financial write commit atomically.
+
+### 9.6 MEDIUM (fixed) — `listCashMovements` cross-shift read (IDOR-lite)
+
+**Finding:** `listCashMovements(actor, shiftId)` (`src/services/shift.service.ts`)
+queried movements by `shiftId` with no ownership scoping. Any role holding
+`cash_movements.read` (e.g. a CASHIER) could enumerate another employee's cash-movement
+records by supplying an arbitrary `shiftId` — unlike the write paths and `listShifts`,
+which scope non-Owner/Manager actors to their own shift.
+
+**Fix:** `listCashMovements` now resolves the shift and applies the same
+`canManageOtherShift` scoping as `closeShift`/`recordCashMovement`: OWNER/MANAGER may
+read any shift; every other actor is restricted to their own shift (FORBIDDEN otherwise).
+
+### 9.7 External review findings A–F — reconciled (verified, no code change)
+
+- **A — Supplier payment method vocabulary:** this was the free-form-string bug,
+  now fixed (see §9.4) — the shared enum is used everywhere.
+- **B — Socket.IO: N/A.** No `src/server/socket/` / `server.ts` exists; realtime is
+  SSE (`src/app/api/cafe/events/route.ts` + `src/lib/realtime/cafe-events.ts`). Do not
+  introduce Socket.IO.
+- **C — Payment model: design decision, preserved.** `SaleModel` payments are
+  `["CONFIRMED"]`; online payment state lives on `OnlineOrder`
+  (`PAYMENT_PENDING`/`PAID_ONLINE`/`PAID_AT_DELIVERY`). No blind status change applied.
+- **D — Café financial integration: pattern confirmed.** `createOrder` creates Sale +
+  CafeOrder in one transaction with per-line sugar snapshots. Preserved (no concrete
+  bug found).
+- **E — Brand image: already implemented.** `src/models/brand.ts` has `logo?` data-URI +
+  CRUD + storefront display. No change needed.
+- **F — (validated)** server-authoritative pricing/stock confirmed
+  (`sales.service.ts` idempotency unique index; `inventory.service.ts` transaction-driven
+  stock); Kashier webhook is signature-verified, fail-closed and idempotent.
+
+### 9.8 Remaining audit-only recommendations (not defects; retained for next iteration)
+
+- **Login lockout / per-username + IP throttling** with exponential backoff and
+  temporary lockout (the basic `isRateLimited` throttle is now in place).
+- **`AUTH_SECRET`** default `development-only-insecure-secret` (`env.ts`): today unused
+  for signing; production should fail-closed when it is eventually used. (Recommend
+  rejecting the known default in production.)
+- **N+1 query paths** (`catalog.service.ts listProducts`, `shift.service.ts` list):
+  batch methods for large datasets (TODO for Phase 11).
+- **Dynamic per-product SEO metadata** (`generateMetadata`) + product URLs in the
+  sitemap for the storefront.
+- **A11y:** ARIA tab patterns, cafe order-builder focus trap, per-table `aria-label`s.

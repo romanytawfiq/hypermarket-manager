@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2Icon } from "lucide-react";
-import { kashierRedirectStatusAction } from "@/actions/online-store-actions";
+import { kashierRedirectStatusAction, trackOnlineOrderAction } from "@/actions/online-store-actions";
 import { useCartStore } from "@/store/cart";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,9 +12,12 @@ import { cn } from "@/lib/utils";
  * Kashier merchant redirect return page (Phase 9.2).
  *
  * The customer is returned here by the Kashier hosted payment page. This page is
- * UX only: it reports the payment status and links to order tracking. It never
- * marks the order paid — the authoritative capture is the verified Kashier
- * server webhook (the order flips to PAID_ONLINE shortly after).
+ * UX only and NEVER marks the order paid — the authoritative capture is the
+ * verified Kashier server webhook, which flips the order's `paymentState` to
+ * `PAID_ONLINE` in MongoDB. We therefore QUERY the server for the order's real
+ * status (via the tracking secret kept from checkout) instead of trusting the
+ * redirect alone. The redirect signature is cross-checked as defense-in-depth but
+ * is not the source of truth.
  */
 export default function PaymentReturnPage() {
   const [state, setState] = useState<
@@ -25,28 +28,40 @@ export default function PaymentReturnPage() {
 
   useEffect(() => {
     let active = true;
+
+    // Recover the tracking secret stored before redirect to Kashier.
+    let pending: { orderNumber: string; token: string } | null = null;
+    try {
+      const raw = sessionStorage.getItem("nexa-pending-online");
+      if (raw) pending = JSON.parse(raw) as { orderNumber: string; token: string };
+    } catch {
+      pending = null;
+    }
+
     (async () => {
-      // Recover the tracking secret stored before redirect to Kashier.
-      let pending: { orderNumber: string; token: string } | null = null;
-      try {
-        const raw = sessionStorage.getItem("nexa-pending-online");
-        if (raw) pending = JSON.parse(raw) as { orderNumber: string; token: string };
-      } catch {
-        pending = null;
-      }
+      const search = window.location.search;
+
+      // 1) Cross-check the redirect signature (defense-in-depth, cosmetic).
+      const { signatureValid } = await kashierRedirectStatusAction(search);
+
       if (active) setTracking(pending);
 
-      const search = window.location.search;
-      const { signatureValid, paymentStatus } = await kashierRedirectStatusAction(search);
-      if (!active) return;
-
-      if (!signatureValid) {
-        setState("failed");
-        return;
+      // 2) Query the server for the authoritative order payment status.
+      let serverPaid = false;
+      if (pending?.orderNumber && pending?.token) {
+        const res = await trackOnlineOrderAction({
+          orderNumber: pending.orderNumber,
+          trackingToken: pending.token,
+        });
+        if (res.order) {
+          serverPaid =
+            res.order.paymentState === "PAID_ONLINE" && res.order.paymentCollected === true;
+        }
       }
 
-      const status = String(paymentStatus ?? "").toUpperCase();
-      if (status === "PAID" || status === "SUCCESS" || status === "SUCCESSFUL" || status === "CAPTURED") {
+      if (!active) return;
+
+      if (serverPaid) {
         setState("success");
         clear();
         try {
@@ -54,12 +69,31 @@ export default function PaymentReturnPage() {
         } catch {
           /* ignore */
         }
-      } else if (status === "UNPAID" || status === "FAILED" || status === "DECLINED") {
-        setState("failed");
-      } else {
-        setState("pending");
+        return;
       }
+
+      // No tracking secret to reconcile — degrade to the redirect signature only.
+      if (!pending?.orderNumber && signatureValid) {
+        const { paymentStatus } = await kashierRedirectStatusAction(search);
+        const status = String(paymentStatus ?? "").toUpperCase();
+        if (status === "PAID" || status === "SUCCESS" || status === "SUCCESSFUL" || status === "CAPTURED") {
+          setState("success");
+          clear();
+          try {
+            sessionStorage.removeItem("nexa-pending-online");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+      }
+
+      // Order not yet confirmed paid by the webhook. Conservative "pending":
+      // the payment is still processing server-side, and we never show a false
+      // success on this UX-only page.
+      setState("pending");
     })();
+
     return () => {
       active = false;
     };

@@ -138,13 +138,43 @@ describe("suppliers & purchasing", () => {
     let fetched = await getSupplier(manager, supplier.id);
     expect(fetched.balance).toBe(400);
 
-    await createSupplierPayment(manager, { supplierId: supplier.id, amount: 150, method: "نقدي" });
+    await createSupplierPayment(manager, { supplierId: supplier.id, amount: 150, method: "CASH", idempotencyKey: crypto.randomUUID() });
 
     fetched = await getSupplier(manager, supplier.id);
     expect(fetched.balance).toBe(250);
 
     const ledger = await listSupplierLedger(manager, supplier.id);
     expect(ledger.find((l) => l.type === "PAYMENT")?.amount).toBe(-150);
+  });
+
+  it("a supplier payment is idempotent: replaying the key never double-posts", async () => {
+    const supplier = await createSupplier(manager, { name: "مورد آيدي" });
+    await createPurchase(manager, {
+      supplierId: supplier.id,
+      items: [{ productId, quantity: 4, cost: 100 }],
+    });
+    const key = "supplier-pay-idem-001";
+
+    const first = await createSupplierPayment(manager, {
+      supplierId: supplier.id,
+      amount: 150,
+      method: "CASH",
+      idempotencyKey: key,
+    });
+    const replay = await createSupplierPayment(manager, {
+      supplierId: supplier.id,
+      amount: 150,
+      method: "CASH",
+      idempotencyKey: key,
+    });
+
+    expect(replay.id).toBe(first.id);
+
+    const fetched = await getSupplier(manager, supplier.id);
+    expect(fetched.balance).toBe(250); // 400 - 150, not 400 - 300
+
+    const payments = await listSupplierPayments(manager, supplier.id);
+    expect(payments.length).toBe(1);
   });
 
   it("a supplier return reduces balance and removes stock", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PAYMENT_METHODS } from "@/lib/sales/constants";
 
 /**
  * Shared client/server validations for suppliers, purchases, receiving,
@@ -78,7 +79,15 @@ export type ReceivePurchaseInput = z.infer<typeof receivePurchaseSchema>;
 export const supplierPaymentSchema = z.object({
   supplierId: z.string().min(1, "اختر المورد"),
   amount: z.coerce.number().positive("المبلغ يجب أن يكون أكبر من صفر"),
-  method: z.string().trim().min(1, "اختر طريقة الدفع").max(60, "طريقة الدفع طويلة جدًا"),
+  /**
+   * Validated against the shared closed payment-method enum so supplier payments
+   * aggregate consistently with sales / expenses / customer payments (a free-form
+   * Arabic string would not match the `isCashMethod`/method grouping used across
+   * accounting and shift reconciliation).
+   */
+  method: z.enum(PAYMENT_METHODS, "طريقة الدفع غير صحيحة"),
+  /** Client-generated UUID preventing duplicate submission (idempotency). */
+  idempotencyKey: z.string().trim().min(8, "مفتاح غير صالح").max(80, "مفتاح غير صالح"),
 });
 
 export type SupplierPaymentInput = z.infer<typeof supplierPaymentSchema>;

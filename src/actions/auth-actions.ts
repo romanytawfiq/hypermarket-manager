@@ -6,6 +6,7 @@ import { loginSchema } from "@/lib/validations/auth";
 import { authenticate, destroySession } from "@/services/auth.service";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/auth/session";
 import { resolveError } from "@/lib/errors";
+import { isRateLimited } from "@/lib/rate-limit";
 
 /**
  * Authentication Server Actions.
@@ -30,6 +31,12 @@ export async function loginAction(
   prevState: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
+  // Throttle the unauthenticated login path to limit online brute-force /
+  // credential-stuffing against staff accounts (bcrypt verification is expensive).
+  if (await isRateLimited()) {
+    return { error: "محاولات كثيرة. حاول مرة أخرى بعد قليل" };
+  }
+
   const parsed = loginSchema.safeParse({
     username: formData.get("username"),
     password: formData.get("password"),

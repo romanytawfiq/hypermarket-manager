@@ -43,7 +43,8 @@ export function kashierConfig(): KashierConfig {
   return {
     mode: env.KASHIER_MODE,
     apiKey: env.KASHIER_API_KEY ?? "",
-    secretKey: env.KASHIER_SECRET_KEY ?? "",
+    secretKey:
+      "8eb20a1b449fc9182701a7c09c575c0d$a523cab7c686cfdab3f72c15db9b49bb6676c773a1a35da115523ddcf3acbab95febfc84cc0f85c7a2ec8bc4e294e0b2",
     merchantId: env.KASHIER_MERCHANT_ID ?? "",
     webhookSigningKey: env.KASHIER_WEBHOOK_SIGNING_KEY,
   };
@@ -114,31 +115,37 @@ export async function createPaymentSession(
   }
 
   const expireAt = input.expireAt ?? new Date(Date.now() + 60 * 60 * 1000);
+  const amount = String(Math.round(input.amount * 100) / 100);
+
+  console.log(input);
 
   const body = {
     merchantId: cfg.merchantId,
-    amount: Math.round(input.amount * 100) / 100,
+    amount: amount,
     currency: input.currency,
-    order: {
+    order: JSON.stringify({
       merchantId: cfg.merchantId,
       orderReference: input.orderReference,
-      amount: Math.round(input.amount * 100) / 100,
+      amount: amount,
       currency: input.currency,
       description: input.description,
-      totalAmount: Math.round(input.amount * 100) / 100,
-    },
+      totalAmount: amount,
+    }),
     customer: {
       name: input.customer.name,
       email: input.customer.email ?? "",
       phone: input.customer.phone,
+      reference: input.customer.phone,
     },
     paymentType: "credit",
     allowedMethods: input.allowedMethods ?? "card,wallet",
-    redirectUrl: input.merchantRedirectUrl,
+    merchantRedirect: "https://your-domain.com/store/payment/return",
     serverWebhook: input.serverWebhook,
     expireAt: expireAt.toISOString(),
     maxFailureAttempts: input.maxFailureAttempts ?? 3,
   };
+
+  console.log(cfg);
 
   const res = await fetch(`${apiBase(cfg)}/v3/payment/sessions`, {
     method: "POST",
@@ -285,8 +292,7 @@ export interface KashierWebhookPayload {
  */
 export function webhookOrderReference(payload: KashierWebhookPayload): string {
   const d = payload.data ?? {};
-  const candidate =
-    d.merchantOrderId ?? d.orderReference ?? d.orderId ?? "";
+  const candidate = d.merchantOrderId ?? d.orderReference ?? d.orderId ?? "";
   return typeof candidate === "string" ? candidate : String(candidate);
 }
 

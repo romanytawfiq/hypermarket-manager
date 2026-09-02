@@ -293,14 +293,27 @@ export async function recordCashMovement(
   return { id: doc._id.toString(), type: doc.type, amount: doc.amount, reason: doc.reason };
 }
 
-/** Lists cash movements for a shift. Requires `cash_movements.read`. */
+/**
+ * Lists cash movements for a shift. Requires `cash_movements.read`.
+ * Authorization mirrors the write paths (listShifts/closeShift): an OWNER/MANAGER
+ * may read any shift's movements, while every other role (e.g. a CASHIER holding
+ * `cash_movements.read`) is scoped to their own shift, preventing enumeration of
+ * another cashier's movement records via an arbitrary `shiftId` (IDOR-lite).
+ */
 export async function listCashMovements(
   actor: AuthUser | null,
   shiftId: string,
 ): Promise<Array<{ id: string; type: CashMovementType; amount: number; reason: string; createdAt: string }>> {
-  requirePermission(actor, "cash_movements.read");
+  const authed = requirePermission(actor, "cash_movements.read");
   await dbConnect();
-  const rows = await CashMovementModel.find({ shift: shiftId })
+
+  const shift = await CashierShiftModel.findById(shiftId).lean<{ _id: mongoose.Types.ObjectId; cashierId: mongoose.Types.ObjectId }>();
+  if (!shift) throw new AppError("NOT_FOUND", "الوردية غير موجودة");
+  if (!canManageOtherShift(authed) && shift.cashierId.toString() !== authed.id) {
+    throw new AppError("FORBIDDEN", "لا يمكنك الاطلاع على حركات وردية كاشير آخر");
+  }
+
+  const rows = await CashMovementModel.find({ shift: shift._id })
     .sort({ createdAt: -1 })
     .lean<Array<{ _id: mongoose.Types.ObjectId; type: CashMovementType; amount: number; reason: string; createdAt?: Date }>>();
   return rows.map((r) => ({

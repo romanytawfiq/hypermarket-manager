@@ -236,7 +236,10 @@ async function buildOnlineProductDtos(
     activeReservedMap(ids),
   ]);
   return products.map((p) => {
-    const available = Math.max(0, (sellableMap.get(p._id.toString()) ?? 0) - (reservedMap.get(p._id.toString()) ?? 0));
+    const available = Math.max(
+      0,
+      (sellableMap.get(p._id.toString()) ?? 0) - (reservedMap.get(p._id.toString()) ?? 0),
+    );
     return {
       id: p._id.toString(),
       name: p.name,
@@ -522,7 +525,10 @@ export async function createOnlineOrder(
 
   const qtyByProduct = new Map<string, number>();
   for (const line of input.items) {
-    qtyByProduct.set(line.productId, (qtyByProduct.get(line.productId) ?? 0) + line.quantity);
+    qtyByProduct.set(
+      line.productId,
+      (qtyByProduct.get(line.productId) ?? 0) + line.quantity,
+    );
   }
 
   const committed = await withTransaction(async (session) => {
@@ -535,7 +541,10 @@ export async function createOnlineOrder(
         .select("+trackingToken")
         .lean<OnlineOrderDocument>();
       if (existing) {
-        return { order: toOnlineOrderDto(existing), trackingToken: existing.trackingToken };
+        return {
+          order: toOnlineOrderDto(existing),
+          trackingToken: existing.trackingToken,
+        };
       }
     }
 
@@ -586,7 +595,8 @@ export async function createOnlineOrder(
       });
     }
 
-    const totalAmount = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+    const totalAmount =
+      Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
     const payableAmount = Math.round((totalAmount + DELIVERY_FEE) * 100) / 100;
 
     // Concurrency-safe order number.
@@ -621,7 +631,9 @@ export async function createOnlineOrder(
           paymentCollected: false,
           trackingToken,
           version: 0,
-          statusHistory: [{ status: "PENDING" as OnlineOrderStatus, at: new Date(), by: undefined }],
+          statusHistory: [
+            { status: "PENDING" as OnlineOrderStatus, at: new Date(), by: undefined },
+          ],
           idempotencyKey: input.idempotencyKey,
         },
       ],
@@ -657,7 +669,9 @@ export async function createOnlineOrder(
       after: { orderNumber, trackingToken, payableAmount, itemCount: lines.length },
     });
 
-    const doc = await OnlineOrderModel.findById(order._id).session(session).lean<OnlineOrderDocument>();
+    const doc = await OnlineOrderModel.findById(order._id)
+      .session(session)
+      .lean<OnlineOrderDocument>();
     if (!doc) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء حفظ الطلب");
     return { order: toOnlineOrderDto(doc), trackingToken };
   });
@@ -696,21 +710,23 @@ async function createOnlinePaymentSession(
 ): Promise<{ sessionUrl: string; sessionId: string; order: OnlineOrderDto } | null> {
   const appUrl = env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   let session: Awaited<ReturnType<typeof createPaymentSession>>;
+
   try {
     session = await createPaymentSession({
-    orderReference: order.orderNumber,
-    amount: order.payableAmount,
-    currency: "EGP",
-    customer: {
-      name: input.customerName,
-      email: input.customerEmail,
-      phone: input.customerPhone,
-    },
-    description: `طلب متجر ${order.orderNumber}`,
-    merchantRedirectUrl: `${appUrl}/store/payment/return`,
-    serverWebhook: `${appUrl}/api/payments/kashier-webhook`,
-  });
+      orderReference: order.orderNumber,
+      amount: order.payableAmount,
+      currency: "EGP",
+      customer: {
+        name: input.customerName,
+        email: input.customerEmail,
+        phone: input.customerPhone,
+      },
+      description: `طلب متجر ${order.orderNumber}`,
+      merchantRedirectUrl: `${appUrl}/store/payment/return`,
+      serverWebhook: `${appUrl}/api/payments/kashier-webhook`,
+    });
   } catch (error) {
+    console.log("Error:############", error);
     if (error instanceof KashierGatewayError) {
       throw new AppError("INTERNAL", "تعذّر الاتصال ببوابة الدفع. حاول مرة أخرى");
     }
@@ -745,7 +761,11 @@ async function createOnlinePaymentSession(
   const fresh = await OnlineOrderModel.findById(order.id).lean<OnlineOrderDocument>();
   const freshDto = fresh ? toOnlineOrderDto(fresh) : order;
 
-  return { sessionUrl: session.sessionUrl, sessionId: session.sessionId, order: freshDto };
+  return {
+    sessionUrl: session.sessionUrl,
+    sessionId: session.sessionId,
+    order: freshDto,
+  };
 }
 
 /** Computes per-product available stock (sellable minus active reservations). */
@@ -804,9 +824,12 @@ export async function trackOnlineOrder(
   trackingToken: string,
 ): Promise<OnlineOrderDto> {
   await dbConnect();
-  const order = await OnlineOrderModel.findOne({ orderNumber, trackingToken })
-    .lean<OnlineOrderDocument>();
-  if (!order) throw new AppError("NOT_FOUND", "الطلب غير موجود. تحقق من رقم الطلب ورمز التتبع");
+  const order = await OnlineOrderModel.findOne({
+    orderNumber,
+    trackingToken,
+  }).lean<OnlineOrderDocument>();
+  if (!order)
+    throw new AppError("NOT_FOUND", "الطلب غير موجود. تحقق من رقم الطلب ورمز التتبع");
   return toOnlineOrderDto(order);
 }
 
@@ -887,11 +910,13 @@ export async function listOnlineOrdersPage(
 
   if (query.from) {
     const from = new Date(query.from);
-    if (!Number.isNaN(from.getTime())) filter.createdAt = { ...(filter.createdAt ?? {}), $gte: from };
+    if (!Number.isNaN(from.getTime()))
+      filter.createdAt = { ...(filter.createdAt ?? {}), $gte: from };
   }
   if (query.to) {
     const to = new Date(query.to);
-    if (!Number.isNaN(to.getTime())) filter.createdAt = { ...(filter.createdAt ?? {}), $lte: to };
+    if (!Number.isNaN(to.getTime()))
+      filter.createdAt = { ...(filter.createdAt ?? {}), $lte: to };
   }
 
   if (query.search && query.search.trim().length > 0) {
@@ -942,7 +967,13 @@ const ALLOWED_NEXT: Record<string, readonly string[]> = {
   CONFIRMED: ["PREPARING", "CANCELLED"],
   PREPARING: ["READY_FOR_DELIVERY", "CANCELLED"],
   READY_FOR_DELIVERY: ["OUT_FOR_DELIVERY", "CANCELLED"],
-  OUT_FOR_DELIVERY: ["DELIVERED", "CANCELLED"],
+  // OUT_FOR_DELIVERY is intentionally NOT given a generic -> DELIVERED transition.
+  // Reaching DELIVERED must post the financial Sale, so the only valid paths are
+  // `collectCodAndDeliver` (COD) and `deliverPaidOnlineOrder` (ONLINE), which both
+  // record the Sale + fulfill inventory reservations in one transaction. Allowing a
+  // bare DELIVERED here would let an operator mark an order delivered (and terminal)
+  // while the money is never recorded and reservations are never fulfilled.
+  OUT_FOR_DELIVERY: ["CANCELLED"],
 };
 
 /**
@@ -1136,7 +1167,8 @@ export async function collectCodAndDeliver(
       session,
     );
 
-    if (!sale) throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء تسجيل الدفع عند الاستلام");
+    if (!sale)
+      throw new AppError("INTERNAL", "حدث خطأ غير متوقع أثناء تسجيل الدفع عند الاستلام");
 
     const now = new Date();
     const saleId = (sale as unknown as { _id: { toString(): string } })._id.toString();
@@ -1218,10 +1250,7 @@ export async function markOnlineOrderPaid(input: {
 
     // Guard: the captured amount must match the order's payable amount.
     if (Math.abs((input.amount ?? 0) - order.payableAmount) > 0.001) {
-      throw new AppError(
-        "CONFLICT",
-        "قيمة الدفعة الإلكترونية لا تطابق قيمة الطلب",
-      );
+      throw new AppError("CONFLICT", "قيمة الدفعة الإلكترونية لا تطابق قيمة الطلب");
     }
 
     const now = new Date();
@@ -1298,19 +1327,13 @@ export async function deliverPaidOnlineOrder(
       throw new AppError("CONFLICT", "لا يمكن تسليم طلب منتهي");
     }
     if (order.status !== "OUT_FOR_DELIVERY") {
-      throw new AppError(
-        "CONFLICT",
-        "يجب أن يكون الطلب خارجًا للتوصيل قبل تسليمه",
-      );
+      throw new AppError("CONFLICT", "يجب أن يكون الطلب خارجًا للتوصيل قبل تسليمه");
     }
     if (order.paymentMethod !== "ONLINE") {
       throw new AppError("CONFLICT", "هذا الطلب غير مدفوع إلكترونيًا");
     }
     if (order.paymentState !== "PAID_ONLINE" || !order.paymentCollected) {
-      throw new AppError(
-        "CONFLICT",
-        "لم يتم تأكيد الدفع الإلكتروني لهذا الطلب بعد",
-      );
+      throw new AppError("CONFLICT", "لم يتم تأكيد الدفع الإلكتروني لهذا الطلب بعد");
     }
     if (order.saleId) {
       throw new AppError("CONFLICT", "تم تسليم هذا الطلب وتسجيل مبيعه مسبقًا");

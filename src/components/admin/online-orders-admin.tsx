@@ -7,6 +7,8 @@ import { Loader2Icon, RefreshCcwIcon, EyeIcon, BanIcon } from "lucide-react";
 import {
   listOnlineOrdersPageAction,
   transitionOnlineOrderAction,
+  collectCodAndDeliverAction,
+  deliverPaidOnlineOrderAction,
 } from "@/actions/online-store-actions";
 import type {
   OnlineOrderDto,
@@ -53,7 +55,9 @@ const NEXT_STEP: Record<string, OnlineOrderStatus | undefined> = {
   CONFIRMED: "PREPARING",
   PREPARING: "READY_FOR_DELIVERY",
   READY_FOR_DELIVERY: "OUT_FOR_DELIVERY",
-  OUT_FOR_DELIVERY: "DELIVERED",
+  // OUT_FOR_DELIVERY deliberately has NO generic next step: the final delivery
+  // must post the financial Sale (see deliver() below) so the money is recorded
+  // and reservations fulfilled. There is no bare "DELIVERED" transition.
 };
 
 const PAGE_SIZE = 20;
@@ -150,6 +154,31 @@ export function OnlineOrdersAdmin({ canManage }: { canManage: boolean }) {
         setRevision((r) => r + 1);
       } else {
         toast.error(res.error ?? "تعذّر تحديث حالة الطلب");
+      }
+    });
+  }
+
+  // Final delivery must post the financial Sale (COD cash collection or the
+  // already-captured ONLINE payment). It reuses the same financial service that
+  // the delivery board calls, so the Sale always enters accounting (server-side).
+  function deliver(order: OnlineOrderDto) {
+    setTransit((p) => ({ ...p, [order.id]: true }));
+    startTransition(async () => {
+      const res =
+        order.paymentMethod === "ONLINE"
+          ? await deliverPaidOnlineOrderAction(order.id)
+          : await collectCodAndDeliverAction(order.id);
+      setTransit((p) => ({ ...p, [order.id]: false }));
+      if (res.order) {
+        toast.success(
+          order.paymentMethod === "ONLINE"
+            ? "تم تسليم الطلب وتسجيل مبيعه الإلكتروني"
+            : "تم تسليم الطلب وتحصيل الدفع عند الاستلام",
+        );
+        setLoading(true);
+        setRevision((r) => r + 1);
+      } else {
+        toast.error(res.error ?? "تعذّر إتمام التسليم. تأكد من فتح وردية لتسجيل البيع");
       }
     });
   }
@@ -331,6 +360,18 @@ export function OnlineOrdersAdmin({ canManage }: { canManage: boolean }) {
                                   <Loader2Icon className="size-3.5 animate-spin" />
                                 ) : null}
                                 تقدم
+                              </Button>
+                            ) : null}
+                            {order.status === "OUT_FOR_DELIVERY" ? (
+                              <Button
+                                size="sm"
+                                disabled={transit[order.id]}
+                                onClick={() => deliver(order)}
+                              >
+                                {transit[order.id] ? (
+                                  <Loader2Icon className="size-3.5 animate-spin" />
+                                ) : null}
+                                تسليم + تسجيل البيع
                               </Button>
                             ) : null}
                             <Button

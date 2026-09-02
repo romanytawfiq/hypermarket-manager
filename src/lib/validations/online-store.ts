@@ -53,6 +53,26 @@ export const onlineCheckoutSchema = z.object({
 });
 export type OnlineCheckoutInput = z.infer<typeof onlineCheckoutSchema>;
 
+/**
+ * Client-side-only checkout schema (react-hook-form resolver).
+ *
+ * The checkout <form> only renders/registers the customer + delivery-address
+ * fields; `items`, `paymentMethod`, and `idempotencyKey` are supplied
+ * programmatically on submit and are NOT react-hook-form fields. Validating
+ * the <form> values against the full `onlineCheckoutSchema` therefore always
+ * failed (missing `items`, `idempotencyKey`) — so `handleSubmit`'s callback
+ * never ran and submitting did nothing. This schema validates only the fields
+ * actually bound to the form. The server Action still validates the complete
+ * payload with `onlineCheckoutSchema` authoritatively.
+ */
+export const onlineCheckoutFormSchema = z.object({
+  customerName: onlineCheckoutSchema.shape.customerName,
+  customerPhone: onlineCheckoutSchema.shape.customerPhone,
+  customerEmail: onlineCheckoutSchema.shape.customerEmail,
+  deliveryAddress: deliveryAddressSchema,
+});
+export type OnlineCheckoutFormValues = z.infer<typeof onlineCheckoutFormSchema>;
+
 /** Guest order tracking by order number + token (read-only, no credentials). */
 export const onlineTrackOrderSchema = z.object({
   orderNumber: z.string().trim().min(3, "أدخل رقم الطلب").max(40, "رقم الطلب غير صحيح"),

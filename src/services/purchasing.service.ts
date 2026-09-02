@@ -2,6 +2,7 @@ import type mongoose from "mongoose";
 import { AppError } from "@/lib/errors";
 import { dbConnect, withTransaction } from "@/lib/db";
 import { requirePermission } from "@/services/authorization.service";
+import { paymentMethodLabel } from "@/lib/sales/constants";
 import type { AuthUser } from "@/services/auth.service";
 import { recordAudit } from "@/services/audit.service";
 import { PurchaseModel, type PurchaseStatus } from "@/models/purchase";
@@ -10,6 +11,7 @@ import { SupplierLedgerModel } from "@/models/supplier-ledger";
 import { SupplierPaymentModel } from "@/models/supplier-payment";
 import { SupplierReturnModel } from "@/models/supplier-return";
 import { ProductModel } from "@/models/product";
+import { nextSequenceValue } from "@/models/sequence";
 import {
   receivePurchaseStock,
   removeReturnedStock,
@@ -114,9 +116,17 @@ function toPurchaseDto(
   };
 }
 
-async function nextNumber(prefix: string, collection: mongoose.Model<unknown>): Promise<string> {
-  const count = await collection.countDocuments();
-  return `${prefix}-${String(count + 1).padStart(4, "0")}`;
+async function nextNumber(
+  prefix: string,
+  _collection: mongoose.Model<unknown>,
+  session?: mongoose.ClientSession,
+): Promise<string> {
+  // Atomic, concurrency-safe numbering (mirrors sales/cafe). The old
+  // `countDocuments + 1` was racy: two concurrent creates could receive the same
+  // number. findOneAndUpdate($inc) via nextSequenceValue guarantees each caller a
+  // distinct, monotonically increasing value.
+  const seq = await nextSequenceValue(`${prefix.toLowerCase()}-counter`, session);
+  return `${prefix}-${String(seq).padStart(4, "0")}`;
 }
 
 async function loadSupplier(id: string): Promise<{ _id: mongoose.Types.ObjectId; name: string }> {
@@ -184,7 +194,7 @@ export async function createPurchase(
   const totalAmount = items.reduce((s, i) => s + i.lineTotal, 0);
 
   return withTransaction(async (session) => {
-    const purchaseNumber = await nextNumber("P", PurchaseModel as unknown as mongoose.Model<unknown>);
+    const purchaseNumber = await nextNumber("P", PurchaseModel as unknown as mongoose.Model<unknown>, session);
     const [purchase] = await PurchaseModel.create(
       [
         {
@@ -212,7 +222,7 @@ export async function createPurchase(
           {
             supplier: supplier._id,
             amount: totalAmount,
-            method: "نقدي",
+            method: "CASH",
             createdBy: { id: authed.id, username: authed.username },
           },
         ],
@@ -383,6 +393,19 @@ export async function createSupplierPayment(
   const supplier = await loadSupplier(input.supplierId);
 
   return withTransaction(async (session) => {
+    // Idempotency: replaying the same key returns the existing payment so a
+    // retry after a lost response never double-posts money against the supplier.
+    if (input.idempotencyKey) {
+      const existing = await SupplierPaymentModel.findOne({
+        idempotencyKey: input.idempotencyKey,
+      })
+        .session(session)
+        .lean<{ _id: mongoose.Types.ObjectId; amount: number }>();
+      if (existing) {
+        return { id: existing._id.toString(), amount: existing.amount };
+      }
+    }
+
     const [payment] = await SupplierPaymentModel.create(
       [
         {
@@ -390,6 +413,7 @@ export async function createSupplierPayment(
           amount: input.amount,
           method: input.method,
           createdBy: { id: authed.id, username: authed.username },
+          idempotencyKey: input.idempotencyKey,
         },
       ],
       { session },
@@ -404,7 +428,7 @@ export async function createSupplierPayment(
           amount: -input.amount,
           referenceType: "PAYMENT",
           referenceId: payment._id.toString(),
-          description: `دفعة للمورد (${input.method})`,
+          description: `دفعة للمورد (${paymentMethodLabel(input.method)})`,
           settled: true,
         },
       ],
@@ -479,7 +503,7 @@ export async function createSupplierReturn(
   });
 
   return withTransaction(async (session) => {
-    const returnNumber = await nextNumber("R", SupplierReturnModel as unknown as mongoose.Model<unknown>);
+    const returnNumber = await nextNumber("R", SupplierReturnModel as unknown as mongoose.Model<unknown>, session);
     const [ret] = await SupplierReturnModel.create(
       [
         {

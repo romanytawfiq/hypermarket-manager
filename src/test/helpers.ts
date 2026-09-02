@@ -1,8 +1,10 @@
 /**
  * Shared helpers for Phase 1 (identity & auth) integration tests.
  *
- * Runs against the in-memory MongoDB started by `setup.ts`. Each test file
- * calls `resetDb()` in `beforeEach`/`beforeAll` to get a clean, seeded state.
+ * Runs against the in-memory MongoDB replica set started by `setup.ts`
+ * (one instance per Vitest worker, stopped+cleaned up in teardown). Each test
+ * file calls `resetDb()` in `beforeEach`/`beforeAll` to get a clean, seeded
+ * state.
  */
 import mongoose from "mongoose";
 import { dbConnect } from "@/lib/db";
