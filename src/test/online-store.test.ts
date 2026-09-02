@@ -372,6 +372,32 @@ describe("Phase 9 — Online store & delivery", () => {
       });
       expect(assigned.assignedTo?.id).toBe(courier.id);
     });
+
+    it("expires stale reservation holds opportunistically at checkout (no leak)", async () => {
+      const pid = await makeProduct({ name: "منتج صلاحية", purchaseCost: 10, sellingPrice: 20, stock: 8 });
+
+      // Create an order with a reservation, then force its reservation to be
+      // past expiry (simulating an abandoned checkout that held the last unit).
+      const { order } = await createOnlineOrder(
+        checkoutInput({ items: [{ productId: pid, quantity: 8 }], idempotencyKey: "expire-res-1" }),
+      );
+      await InventoryReservationModel.updateMany(
+        { onlineOrder: order.id },
+        { $set: { expiresAt: new Date(Date.now() - 1000) } },
+      );
+
+      // Availability still excludes the logically-expired hold, but a NEW checkout
+      // must (1) not be blocked by the stale hold and (2) expire the stale row so
+      // the collection never accumulates an active-looking RESERVED that never
+      // resolves.
+      const again = await createOnlineOrder(
+        checkoutInput({ items: [{ productId: pid, quantity: 8 }], idempotencyKey: "expire-res-2" }),
+      );
+      expect(again.order.items[0]?.quantity).toBe(8);
+
+      const stale = await InventoryReservationModel.find({ onlineOrder: order.id }).lean();
+      for (const r of stale) expect(r.status).toBe("EXPIRED");
+    });
   });
 
   describe("Admin dashboard listing (server-filtered + paginated)", () => {
@@ -601,6 +627,15 @@ describe("Phase 9 — Online store & delivery", () => {
       }
       const courier = await deliveryActor("delivery_no_shift");
 
+      // The collecting employee must be assigned to the order (server-enforced
+      // delivery authorization scope) before the shift-open financial guard can
+      // even be reached.
+      await assignOnlineOrder(manager, {
+        orderId: order.id,
+        employeeId: courier.id,
+        employeeUsername: courier.username,
+      });
+
       let caught: unknown;
       try {
         await collectCodAndDeliver(courier, order.id);
@@ -626,6 +661,11 @@ describe("Phase 9 — Online store & delivery", () => {
 
       const courier = await deliveryActor("delivery_collect");
       await openShift(courier, { openingCash: 0 });
+      await assignOnlineOrder(manager, {
+        orderId: order.id,
+        employeeId: courier.id,
+        employeeUsername: courier.username,
+      });
 
       const res = await collectCodAndDeliver(courier, order.id);
       expect(res.status).toBe("DELIVERED");
@@ -677,6 +717,98 @@ describe("Phase 9 — Online store & delivery", () => {
       }
       expect(caught).toBeInstanceOf(AppError);
       if (caught instanceof AppError) expect(caught.code).toBe("FORBIDDEN");
+    });
+
+    it("rejects a delivery employee acting on an order that was never assigned to them", async () => {
+      const pid = await makeProduct({ name: "منتج تعيين", purchaseCost: 10, sellingPrice: 30, stock: 8 });
+      const { order } = await createOnlineOrder(
+        checkoutInput({ items: [{ productId: pid, quantity: 2 }], idempotencyKey: crypto.randomUUID() }),
+      );
+      for (const s of ["CONFIRMED", "PREPARING", "READY_FOR_DELIVERY", "OUT_FOR_DELIVERY"] as OnlineOrderDto["status"][]) {
+        await transitionOnlineOrder(manager, { orderId: order.id, targetStatus: s });
+      }
+
+      // This courier is NOT assigned to the order and does not hold
+      // `online.orders.manage` (DELIVERY role). They must be rejected even though
+      // they have `delivery.orders.update` + `sales.create` — the server must not
+      // rely on the UI scoping the list.
+      const courier = await deliveryActor("delivery_not_assigned");
+      await openShift(courier, { openingCash: 0 });
+
+      let caught: unknown;
+      try {
+        await collectCodAndDeliver(courier, order.id);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AppError);
+      if (caught instanceof AppError) expect(caught.code).toBe("FORBIDDEN");
+
+      // The same guard applies to the generic transition step (OUT_FOR_DELIVERY).
+      let transitionCaught: unknown;
+      try {
+        await transitionOnlineOrder(courier, { orderId: order.id, targetStatus: "CANCELLED" });
+      } catch (e) {
+        transitionCaught = e;
+      }
+      expect(transitionCaught).toBeInstanceOf(AppError);
+      if (transitionCaught instanceof AppError) expect(transitionCaught.code).toBe("FORBIDDEN");
+    });
+
+    it("allows a delivery employee to dispatch/collect an unassigned READY order they claim", async () => {
+      const pid = await makeProduct({ name: "منتج تعيين حر", purchaseCost: 10, sellingPrice: 20, stock: 5 });
+      const { order } = await createOnlineOrder(
+        checkoutInput({ items: [{ productId: pid, quantity: 1 }], idempotencyKey: crypto.randomUUID() }),
+      );
+      // Advance to READY_FOR_DELIVERY (admin), then leave it UNASSIGNED.
+      for (const s of ["CONFIRMED", "PREPARING", "READY_FOR_DELIVERY"] as OnlineOrderDto["status"][]) {
+        await transitionOnlineOrder(manager, { orderId: order.id, targetStatus: s });
+      }
+
+      const courier = await deliveryActor("delivery_claim_ready");
+      await openShift(courier, { openingCash: 0 });
+
+      // A DELIVERY employee may dispatch an unassigned READY_FOR_DELIVERY order.
+      const dispatched = await transitionOnlineOrder(courier, {
+        orderId: order.id,
+        targetStatus: "OUT_FOR_DELIVERY",
+      });
+      expect(dispatched.status).toBe("OUT_FOR_DELIVERY");
+
+      // Once out for delivery (still unassigned), the same employee can still
+      // collect because the order is the one they just dispatched (still counts
+      // as available through the delivery listing scope exercised above). To be
+      // deterministic and match the assignment rule, assign it to the courier.
+      await assignOnlineOrder(manager, {
+        orderId: order.id,
+        employeeId: courier.id,
+        employeeUsername: courier.username,
+      });
+      const collected = await collectCodAndDeliver(courier, order.id);
+      expect(collected.status).toBe("DELIVERED");
+      expect(collected.paymentState).toBe("PAID_AT_DELIVERY");
+    });
+
+    it("prevents assigning a delivery employee to a terminal order", async () => {
+      const pid = await makeProduct({ name: "منتج تعيين نهائي", purchaseCost: 10, sellingPrice: 20, stock: 4 });
+      const { order } = await createOnlineOrder(
+        checkoutInput({ items: [{ productId: pid, quantity: 1 }], idempotencyKey: crypto.randomUUID() }),
+      );
+      await transitionOnlineOrder(manager, { orderId: order.id, targetStatus: "CANCELLED" });
+
+      const courier = await deliveryActor("delivery_assign_terminal");
+      let caught: unknown;
+      try {
+        await assignOnlineOrder(manager, {
+          orderId: order.id,
+          employeeId: courier.id,
+          employeeUsername: courier.username,
+        });
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AppError);
+      if (caught instanceof AppError) expect(caught.code).toBe("CONFLICT");
     });
   });
 
@@ -868,6 +1000,11 @@ describe("Phase 9 — Online store & delivery", () => {
 
       const courier = await deliveryActor("delivery_online_paid");
       await openShift(courier, { openingCash: 0 });
+      await assignOnlineOrder(manager, {
+        orderId: order.id,
+        employeeId: courier.id,
+        employeeUsername: courier.username,
+      });
 
       const res = await deliverPaidOnlineOrder(courier, order.id);
       expect(res.status).toBe("DELIVERED");

@@ -138,7 +138,6 @@ export async function createOnlineOrderAction(
       paymentSessionId: result.paymentSessionId,
     };
   } catch (error) {
-    console.log(error);
     return { error: resolveError(error).userMessage };
   }
 }

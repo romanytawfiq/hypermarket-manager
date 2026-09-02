@@ -43,8 +43,7 @@ export function kashierConfig(): KashierConfig {
   return {
     mode: env.KASHIER_MODE,
     apiKey: env.KASHIER_API_KEY ?? "",
-    secretKey:
-      "8eb20a1b449fc9182701a7c09c575c0d$a523cab7c686cfdab3f72c15db9b49bb6676c773a1a35da115523ddcf3acbab95febfc84cc0f85c7a2ec8bc4e294e0b2",
+    secretKey: env.KASHIER_SECRET_KEY ?? "",
     merchantId: env.KASHIER_MERCHANT_ID ?? "",
     webhookSigningKey: env.KASHIER_WEBHOOK_SIGNING_KEY,
   };
@@ -117,8 +116,6 @@ export async function createPaymentSession(
   const expireAt = input.expireAt ?? new Date(Date.now() + 60 * 60 * 1000);
   const amount = String(Math.round(input.amount * 100) / 100);
 
-  console.log(input);
-
   const body = {
     merchantId: cfg.merchantId,
     amount: amount,
@@ -144,8 +141,6 @@ export async function createPaymentSession(
     expireAt: expireAt.toISOString(),
     maxFailureAttempts: input.maxFailureAttempts ?? 3,
   };
-
-  console.log(cfg);
 
   const res = await fetch(`${apiBase(cfg)}/v3/payment/sessions`, {
     method: "POST",

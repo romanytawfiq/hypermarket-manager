@@ -8,6 +8,8 @@ import {
   verifyWebhookSignature,
   webhookOrderReference,
   isKashierPaid,
+  kashierConfig,
+  isKashierConfigured,
 } from "@/lib/kashier";
 
 /**
@@ -156,6 +158,26 @@ describe("Phase 9.2 — Kashier gateway signatures", () => {
       expect(isKashierPaid({ data: { paymentStatus: "PENDING" } })).toBe(false);
       expect(isKashierPaid({ data: { paymentStatus: "FAILED" } })).toBe(false);
       expect(isKashierPaid({ data: { orderStatus: "SUCCESSFUL" } })).toBe(true);
+    });
+  });
+
+  describe("config & secret handling (no hardcoded secrets)", () => {
+    it("reads the secret key and api key from the environment, never a literal", () => {
+      // vitest.config.mts provides KASHIER_SECRET_KEY="test-secret-key",
+      // KASHIER_API_KEY="test-api-key", KASHIER_MERCHANT_ID="MID-test-000".
+      const cfg = kashierConfig();
+      expect(cfg.secretKey).toBe("test-secret-key");
+      expect(cfg.apiKey).toBe("test-api-key");
+      expect(cfg.merchantId).toBe("MID-test-000");
+      // Regression guard: an earlier version hardcoded a long production-looking
+      // secret key literal here. Config must be derived purely from env so no
+      // credential is embedded in source.
+      expect(cfg.secretKey).not.toMatch(/\$[0-9a-f]{40,}/i);
+      expect(cfg.secretKey).not.toMatch(/8eb20a1b449fc9182701a7c09c575c0d/i);
+    });
+
+    it("isKashierConfigured is true when all three credentials are set", () => {
+      expect(isKashierConfigured()).toBe(true);
     });
   });
 });

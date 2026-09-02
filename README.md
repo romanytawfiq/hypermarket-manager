@@ -6,8 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 9 Complete (Online Store & Delivery)**
-> Phases 0–7.1 (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting → Dashboard Overview → café/KDS → café payment integration) are implemented. **Phase 9 — Online Store & Delivery** is now implemented: a public Arabic-first `/store` front (guest cart, checkout, COD), an explicit online-order state machine with inventory reservation, a DELIVERY role and delivery board, admin order management, guest tracking, SEO and checkout rate limiting. See [Development Status](#development-status).
+> **Status: Phase 11 Production Hardening Complete**
+> Phases 0–7.1, Phase 8 (Printing), Phase 9 (Online Store & Delivery), and the Phase 10/11 financial-integrity & security audits are implemented. Phase 8 delivers Arabic RTL browser thermal printing (58mm/80mm) for sales, café, and payment receipts via a dedicated non-indexable print route. Phase 9 delivers a public Arabic-first `/store` front (guest cart, checkout, COD/online payment), an online-order state machine with inventory reservation, a DELIVERY role and delivery board, admin order management, guest tracking, SEO and rate limiting. See [Development Status](#development-status).
 
 ---
 
@@ -238,7 +238,7 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-Phases 0–7.1 are implemented and the test suite passes (180 tests across 21 files). Phase 9 (Online Store & Delivery) is implemented. The Dashboard Overview redesign is complete.
+Phases 0–9 are implemented and the test suite passes (226 tests across 23 files). Phase 8 (Thermal Printing, browser-based) and Phase 9 (Online Store & Delivery) are complete. The Phase 10/11 financial-integrity & production-hardening audits are complete. Native ESC/POS printing and physical thermal-printer validation are deferred (see [Printing](#printing)).
 
 | Phase | Status |
 |-------|--------|
@@ -252,10 +252,10 @@ Phases 0–7.1 are implemented and the test suite passes (180 tests across 21 fi
 | **Dashboard Overview** | ✅ Complete |
 | **7 — Café / KDS** | ✅ Complete |
 | **7.1 — Café Payment Integration & Per-Cup Sugar** | ✅ Complete |
-| **8 — Printing** | Planned |
+| **8 — Printing (browser)** | ✅ Complete |
 | **9 — Online Store & Delivery** | ✅ Complete |
-| **10 — Reports & Audit** | Planned |
-| **11 — Production Hardening** | Planned |
+| **10 — Reports & Audit** | ✅ Complete |
+| **11 — Production Hardening** | ✅ Complete |
 
 ### Phase 2 — Catalog & Inventory Core (Implemented)
 
@@ -286,6 +286,31 @@ Cashier café-order creation and a barista **Kitchen Display System** (`/kds`) w
 ### Phase 7.1 — Café Payment Integration & Per-Cup Sugar (Implemented)
 
 Creating a café order now posts the **financial Sale** in the same MongoDB transaction as the order: payments (full payment; mixed methods supported, cash tendered + change), sellable-stock deduction, customer snapshot, and the cashier-shift effect all commit atomically — no second ledger, and `CafeOrder.totalAmount` can never diverge from `Sale.total`. The order stores a stable `saleId` link + the invoice number (`INV-…`). **Per-cup sugar** is a first-class structured option (سادة / ريحة / مزبوط / مانو / زيادة / فوق الزيادة / كراميل): different-sugar cups are always separate order lines (never merged) and products must advertise `supportsSugarOptions` to accept a sugar choice. Cancellation remains operational — the linked Sale is never mutated.
+
+### Phase 8 — Printing (Implemented)
+
+Receipts are a first-class, print-optimized feature (see [Printing](#printing)):
+
+- **Browser HTML/CSS printing** for **58mm** and **80mm** thermal paper, with
+  dedicated `@media print` styles, `@page` sizing, and dark-on-light ink styling
+  so receipts read well on thermal paper.
+- **Arabic RTL** receipts with correct right-aligned layout, the store identity
+  from a runtime configurable source, and responsive wrapping (products/notes now
+  wrap and `overflow-wrap` instead of overflowing narrow paper).
+- Printable documents — **sales receipts**, **café order receipts** (items +
+  sugar/note + linked invoice), and **customer payment receipts** — are rendered
+  from **persisted transaction data** via a server-derived `ReceiptViewModel`
+  (never from uncommitted cart state).
+- Printing happens on a **dedicated authenticated, non-indexable route**
+  (`/print/sale|cafe|payment/[id]`) with auto-print on load and a manual print
+  fallback; in-app previews render the same document.
+- **Reprints reuse the stored invoice/order number and never create a new
+  transaction.**
+- **Server-side permission control** (`receipts.print` + the relevant read
+  permission) guards every print action.
+- The strategy is phased: HTML/CSS browser printing is complete; **native ESC/POS
+  printing** and **physical validation against real thermal printers** remain
+  outstanding (deferred milestone).
 
 ### Phase 9 — Online Store & Delivery (Implemented)
 

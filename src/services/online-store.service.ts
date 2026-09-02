@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { AppError } from "@/lib/errors";
+import { AppError, resolveError } from "@/lib/errors";
 import { dbConnect, withTransaction } from "@/lib/db";
 import { requirePermission, requireAuth } from "@/services/authorization.service";
 import type { AuthUser } from "@/services/auth.service";
@@ -55,6 +55,68 @@ import { env } from "@/lib/env";
 
 const ORDER_PREFIX = "ON";
 const RESERVATION_TTL_MS = 60 * 60 * 1000; // 1h hold on an abandoned reserved checkout
+
+/**
+ * Delivery-scoped assignment enforcement.
+ *
+ * A DELIVERY-role employee (one who holds `delivery.orders.update` but NOT
+ * `online.orders.manage`) can only operate fulfillment actions
+ * (`transitionOnlineOrder` delivery step, `collectCodAndDeliver`,
+ * `deliverPaidOnlineOrder`) on orders explicitly assigned to them, or on an
+ * unassigned READY_FOR_DELIVERY order they are dispatching. The UI scopes a
+ * delivery employee's list to assigned/ready orders, but that listing scope is
+ * NOT a security boundary — this check re-enforces assignment server-side so a
+ * delivery employee cannot act on an arbitrary order id they were never
+ * assigned (`delivery` authorization scope; see docs/architecture.md §18).
+ *
+ * Managers/owners (holders of `online.orders.manage`) manage every order and
+ * are exempt from this restriction.
+ */
+function assertDeliveryAssignment(
+  actor: AuthUser,
+  order: Pick<OnlineOrderDocument, "status" | "assignedTo">,
+): void {
+  const isFulfillmentManager = actor.permissions.has("online.orders.manage");
+  if (isFulfillmentManager) return;
+  if (!actor.permissions.has("delivery.orders.update")) return;
+
+  const assignedToMe = order.assignedTo?.id === actor.id;
+  const dispatchingUnassignedReady =
+    order.status === "READY_FOR_DELIVERY" && !order.assignedTo;
+  if (assignedToMe || dispatchingUnassignedReady) return;
+
+  throw new AppError(
+    "FORBIDDEN",
+    "لا يمكنك تنفيذ هذا الإجراء على طلب غير مخصص لك",
+  );
+}
+
+/**
+ * Opportunistic reservation cleanup: transitions any `RESERVED` reservation
+ * whose `expiresAt` has passed to `EXPIRED`.
+ *
+ * There is deliberately NO TTL index on reservations and NO background
+ * scheduler. Expired holds must not be physically deleted (they are audit
+ * history for the online order), but they should be moved to a terminal state
+ * so the collection does not grow unboundedly and queries that filter on
+ * `status: "RESERVED"` never mutate stale rows. This is an online-order cleanup
+ * invoked at checkout — the moment reservation pressure is at its highest in
+ * the normal operating model — and is a small, bounded `updateMany` that only
+ * touches rows that are already inactive by the read-time rule
+ * (`RESERVED && expiresAt > now`). Never touches active reservations.
+ */
+async function expireStaleReservations(): Promise<void> {
+  try {
+    await InventoryReservationModel.updateMany(
+      { status: "RESERVED" as ReservationStatus, expiresAt: { $lte: new Date() } },
+      { $set: { status: "EXPIRED" as ReservationStatus } },
+    );
+  } catch (error) {
+    // Cleanup is best-effort and must never block a real checkout. Log without
+    // leaking internals.
+    console.error("[online-store] reservation cleanup failed", resolveError(error));
+  }
+}
 
 export interface OnlineOrderDto {
   id: string;
@@ -509,6 +571,12 @@ export async function createOnlineOrder(
 ): Promise<CheckoutResult> {
   await dbConnect();
 
+  // Opportunistically expire stale reservation holds before computing
+  // availability, so checkout never blocks against an abandoned reservation and
+  // the reservation collection does not accumulate active-looking RESERVED rows
+  // that are logically expired (see expireStaleReservations).
+  await expireStaleReservations();
+
   const paymentMethod: OnlineOrderPaymentMethod =
     input.paymentMethod === "ONLINE" ? "ONLINE" : "COD";
 
@@ -726,7 +794,6 @@ async function createOnlinePaymentSession(
       serverWebhook: `${appUrl}/api/payments/kashier-webhook`,
     });
   } catch (error) {
-    console.log("Error:############", error);
     if (error instanceof KashierGatewayError) {
       throw new AppError("INTERNAL", "تعذّر الاتصال ببوابة الدفع. حاول مرة أخرى");
     }
@@ -1027,6 +1094,10 @@ export async function transitionOnlineOrder(
     if (!allowed.includes(input.targetStatus)) {
       throw new AppError("CONFLICT", "حالة غير مسموح بها لهذا الطلب حاليًا");
     }
+    // Delivery-scoped assignment enforcement: a delivery-only employee may only
+    // operate on orders assigned to them (or dispatch an unassigned ready one).
+    const authed = requireAuth(actor);
+    assertDeliveryAssignment(authed, order);
 
     const now = new Date();
     const res = await OnlineOrderModel.findOneAndUpdate(
@@ -1090,12 +1161,27 @@ export async function assignOnlineOrder(
       ? { id: input.employeeId, username: input.employeeUsername }
       : undefined;
 
-  const order = await OnlineOrderModel.findByIdAndUpdate(
+  const order = await OnlineOrderModel.findById(input.orderId).lean<OnlineOrderDocument>();
+  if (!order) throw new AppError("NOT_FOUND", "الطلب غير موجود");
+  if (TERMINAL_ONLINE_STATUSES.includes(order.status)) {
+    throw new AppError("CONFLICT", "لا يمكن تعديل تعيين طلب منتهي");
+  }
+
+  const updated = await OnlineOrderModel.findByIdAndUpdate(
     input.orderId,
-    { $set: { assignedTo: assignedTo ?? null } },
+    {
+      $set: { assignedTo: assignedTo ?? null, version: order.version + 1 },
+      $push: {
+        statusHistory: {
+          status: order.status,
+          at: new Date(),
+          by: { id: actor?.id, username: actor?.username },
+        },
+      },
+    },
     { returnDocument: "after" },
   ).lean<OnlineOrderDocument>();
-  if (!order) throw new AppError("NOT_FOUND", "الطلب غير موجود");
+  if (!updated) throw new AppError("NOT_FOUND", "الطلب غير موجود");
 
   await recordAudit({
     actorId: actor?.id,
@@ -1106,7 +1192,7 @@ export async function assignOnlineOrder(
     after: { assignedTo: assignedTo ?? null },
   });
 
-  return toOnlineOrderDto(order);
+  return toOnlineOrderDto(updated);
 }
 
 /**
@@ -1150,6 +1236,8 @@ export async function collectCodAndDeliver(
         "يجب أن يكون الطلب خارجًا للتوصيل قبل تحصيل الدفع عند الاستلام",
       );
     }
+    // Delivery-scoped assignment enforcement (see assertDeliveryAssignment).
+    assertDeliveryAssignment(authed, order);
 
     // Build the authoritative SaleCreateInput from the order's snapshot lines.
     const sale = await createSaleWithSession(
@@ -1338,6 +1426,8 @@ export async function deliverPaidOnlineOrder(
     if (order.saleId) {
       throw new AppError("CONFLICT", "تم تسليم هذا الطلب وتسجيل مبيعه مسبقًا");
     }
+    // Delivery-scoped assignment enforcement (see assertDeliveryAssignment).
+    assertDeliveryAssignment(authed, order);
 
     const sale = await createSaleWithSession(
       authed,

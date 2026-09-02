@@ -29,7 +29,15 @@ const envSchema = z.object({
    * Secret used to sign authentication sessions. Introduced in the
    * authentication phase; validated here so configuration is centralized.
    */
-  AUTH_SECRET: z.string().default("development-only-insecure-secret"),
+  AUTH_SECRET: z.string().refine(
+    (val) => {
+      if (process.env.NODE_ENV === "production" && val === "development-only-insecure-secret") {
+        return false;
+      }
+      return true;
+    },
+    { message: "AUTH_SECRET must be set to a secure value in production" },
+  ).default("development-only-insecure-secret"),
 
   /** Lifetime of an authentication session in days. */
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),

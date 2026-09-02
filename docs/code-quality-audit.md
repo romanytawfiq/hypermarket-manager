@@ -405,3 +405,125 @@ read any shift; every other actor is restricted to their own shift (FORBIDDEN ot
 - **Dynamic per-product SEO metadata** (`generateMetadata`) + product URLs in the
   sitemap for the storefront.
 - **A11y:** ARIA tab patterns, cafe order-builder focus trap, per-table `aria-label`s.
+
+---
+
+## 10. Phase 11 — Production Hardening Audit (2026-09-02)
+
+Hardening pass focused on **security, integrity, and correctness at the delivery/
+payment boundary**. Everything below was **verified against source and fixed in this
+pass**. This pass added **no new product features** — it constrained an existing,
+verified implementation and closed real weaknesses (the delivery-listing scope was
+**not** a security boundary). Regression gate after fixes: `eslint` clean, `tsc
+--noEmit` clean, `vitest run` **226 passed / 23 files** (including new regression
+tests), `next build` passes.
+
+### 10.1 P0 (fixed) — Hardcoded Kashier secret key in source
+
+**Finding:** `src/lib/kashier.ts` embedded a long, production-looking secret key as
+a **literal that overrode `env.KASHIER_SECRET_KEY`** (the value took precedence even
+when the environment variable was set), plus debug `console.log` calls that printed
+the raw redirect input and the resolved `cfg` (secret). Shipping this would (a) fail
+in any real environment because the literal is not the merchant's key and (b) leak
+sensitive configuration to server logs.
+
+**Fix:** removed the hardcoded literal and both debug `console.log`s. `kashierConfig()`
+now derives the secret entirely from `process.env.KASHIER_SECRET_KEY`. `.env.example`
+was sanitized: the real-looking Kashier credentials were replaced with placeholders
+(`your-kashier-api-key`, `your-kashier-secret-key`, `your-kashier-merchant-id`). The
+webhook + redirect signature logic was left intact (covered by `kashier.test.ts`).
+Added a regression test asserting the config comes from env, not a literal.
+
+### 10.2 P0 (fixed) — `AUTH_SECRET` insecure default fail-closed in production
+
+**Finding:** `src/lib/env.ts` accepted `development-only-insecure-secret` at any
+`NODE_ENV`. If the value is later used for signing (Auth.js, session cookies,
+HMAC), a production deployment that never set `AUTH_SECRET` would silently run on a
+known public secret.
+
+**Fix:** the zod schema now **fails in production** when `AUTH_SECRET` equals the
+insecure default (still permitted in development). Production boots only with an
+explicit, strong secret.
+
+### 10.3 P1 (fixed) — Delivery assignment was UI-scoped, not server-enforced
+
+**Finding:** the DELIVERY listing (`listDeliveryOrders`) scoped which orders a
+courier *saw*, but the delivery-touching actions (`transitionOnlineOrder`,
+`collectCodAndDeliver`, `deliverPaidOnlineOrder`) did not enforce assignment. A
+courier (holding `delivery.orders.update` + `sales.create`) could act on **any**
+order they could reference by id — the list scope was not a security boundary
+(finding flagged during external review as the likely real weakness).
+
+**Fix:** added `assertDeliveryAssignment(actor, order)` in
+`src/services/online-store.service.ts`, called at the top of all three delivery
+actions. A `DELIVERY`-role actor may only act on an order **assigned to them**, or
+an **unassigned `READY_FOR_DELIVERY`** order they are dispatching
+(`OUT_FOR_DELIVERY`). `online.orders.manage` holders are exempt. Unassigned couriers
+get `FORBIDDEN`. New regression tests cover: unassigned courier rejected on collect
+and on generic transition, the unassigned-READY claim path, and assignment rejection
+on terminal orders.
+
+### 10.4 P1 (fixed) — Stale reservation holds never expired (leak)
+
+**Finding:** a `RESERVED` hold could outlive its 1h `expiresAt` (abandoned checkout)
+and remain marked `RESERVED`, permanently reducing online availability while its
+order sat unresolved. There was no cleanup.
+
+**Fix:** `createOnlineOrder` now calls `expireStaleReservations()` (opportunistic,
+non-scheduler, **non-deleting** `RESERVED → EXPIRED` `updateMany`, best-effort,
+logged via `resolveError`) before recomputing availability, so the held stock is
+claimable again and the audit history is preserved. Regression test added.
+
+### 10.5 P1 (fixed) — Sensitive / debug `console.log` in online-store paths
+
+**Finding:** `src/services/online-store.service.ts:729` and
+`src/actions/online-store-actions.ts:141` logged `console.log("Error:############", error)`
+respectively `console.log(error)` — noisy debug output in error paths.
+
+**Fix:** removed both; the code already attaches diagnostic context via
+`resolveError()` for server-side logging.
+
+### 10.6 P2 (fixed) — `assignOnlineOrder` on a terminal order, no version/history bump
+
+**Finding:** `assignOnlineOrder` could be (re)applied to a terminal (DELIVERED/
+CANCELLED) order without audit.
+
+**Fix:** it now rejects terminal orders (`CONFLICT`), pushes a status-history entry
+(`ASSIGNED`), and increments `version` so the assignment participates in optimistic
+concurrency (the schema does not include a `metadata` field, so the raw assignment
+data is recorded through the historical-entry + fields instead of `metadata`).
+
+### 10.7 P2 (fixed) — Thermal receipt text overflow on narrow paper
+
+**Finding:** `receipt-document.tsx` forced `.rd-row-label`, `.rd-row-value`,
+`.rd-item-name`, `.rd-item-note` to `white-space: nowrap`, which overflows 58mm
+print margins for long Arabic product names / notes.
+
+**Fix:** those selectors now wrap (`white-space: normal`) with `overflow-wrap:
+break-word` and `min-width: 0`; `.rd-item-amount` stays right-aligned/nowrap.
+
+### 10.8 Verified, no change
+
+- **Kashier** webhook signature verification is HMAC-SHA256, constant-time,
+  fail-closed, idempotent, and amount-mismatch-safe (`markOnlineOrderPaid` rejects a
+  captured amount ≠ `payableAmount`). Redirect return is UX-only. (Verified.)
+- **Browser printing** (Phase 8) is complete and authoritative: `ReceiptViewModel`
+  from persisted data, dedicated non-indexable print routes, reprints never create a
+  new transaction, server-side permission control, 58/80mm RTL. **No ESC/POS stack
+  and no physical thermal-printer validation this phase** (deferred milestone).
+- **Realtime** is SSE-only with a transactional outbox (`/api/cafe/events`); **no
+  Socket.IO** is present and none was introduced. (Verified — finding B.)
+- **`.env.example`** contains **no** real credentials (Kashier placeholders; Atlas
+  placeholder from the Phase 10 pass). No secrets tracked in git. (Verified.)
+
+### 10.9 Remaining recommendations (retained, not defects)
+
+- N+1 query paths (`listProducts`, shift list) — batch methods for large datasets.
+- Per-username + IP login lockout with backoff (basic throttle is in place).
+- Dynamic per-product SEO metadata + product URLs in the storefront sitemap.
+- A11y: ARIA tab patterns on customer/supplier detail, cafe order-builder focus trap,
+  per-table `aria-label`s.
+- Native **ESC/POS** printing + physical thermal-printer validation (separate
+  milestone from browser printing).
+- Consider whether the Kashier webhook route should trim its logged raw payload on
+  signature failure (server-side only; no client leak found).

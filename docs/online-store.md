@@ -241,6 +241,25 @@ POS-reservation check or a unified reservation-aware stock reservation layer
     `collectCodAndDeliver` / `deliverPaidOnlineOrder` (which require
     `delivery.orders.update` **or** `online.orders.manage`, plus `sales.create`
     enforced inside `createSaleWithSession`).
+- **Server-side assignment enforcement (Phase 11 hardening).** The UI listing
+  scope (`listDeliveryOrders`) is *not* a security boundary. Every
+  delivery-touching action (`transitionOnlineOrder`, `collectCodAndDeliver`,
+  `deliverPaidOnlineOrder`) now runs `assertDeliveryAssignment` before acting:
+  a `DELIVERY`-role actor may only act on an order that is **assigned to them**,
+  or is an **unassigned `READY_FOR_DELIVERY`** order they are dispatching
+  (`target = OUT_FOR_DELIVERY`). Unassigned `OUT_FOR_DELIVERY` orders require a
+  prior assignment. Holders of `online.orders.manage` are exempt (full control).
+  A non-assigned courier gets `FORBIDDEN` even if they hold
+  `delivery.orders.update` + `sales.create`.
+- `assignOnlineOrder` rejects assigning to a **terminal** order and pushes a
+  status-history entry + bumps `version` so the assignment is auditable and
+  conflicts are caught by the same optimistic-concurrency guard.
+- **Reservation-expiry cleanup (Phase 11).** A `RESERVED` hold that outlives its
+  1h `expiresAt` (abandoned checkout) no longer leaks as an *active-looking*
+  row. `createOnlineOrder` opportunistically flips expired `RESERVED` →
+  `EXPIRED` (best-effort, non-deleting — the audit history is preserved) before
+  recomputing availability, so the held stock becomes claimable again without a
+  dedicated scheduler.
 
 ### 4.5 Online (Kashier) payment gateway — Phase 9.2
 

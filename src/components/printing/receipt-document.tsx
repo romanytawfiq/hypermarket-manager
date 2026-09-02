@@ -178,22 +178,23 @@ function receiptPrintCss(width: ReceiptWidth): string {
 .rd-block { display: grid; gap: 2px; }
 
 .rd-row { display: flex; align-items: baseline; justify-content: space-between; gap: 4mm; }
-.rd-row-label { white-space: nowrap; }
-.rd-row-value { text-align: start; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rd-row-label { white-space: normal; overflow-wrap: break-word; min-width: 0; flex-shrink: 1; }
+.rd-row-value { text-align: start; font-variant-numeric: tabular-nums; white-space: normal; overflow-wrap: break-word; min-width: 0; flex-shrink: 1; }
 .rd-row-value--strong { font-weight: 700; }
 
 .rd-item { padding: 1px 0; }
 .rd-item-row { display: flex; align-items: baseline; justify-content: space-between; gap: 4mm; }
-.rd-item-name { font-weight: 500; }
-.rd-item-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rd-item-name { font-weight: 500; white-space: normal; overflow-wrap: break-word; min-width: 0; flex-shrink: 1; hyphens: auto; }
+.rd-item-amount { font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; }
 .rd-item-sub {
   display: flex;
   justify-content: space-between;
   gap: 3mm;
   font-size: 0.92em;
   opacity: 0.8;
+  flex-wrap: wrap;
 }
-.rd-item-note { font-style: normal; }
+.rd-item-note { font-style: normal; white-space: normal; overflow-wrap: break-word; min-width: 0; }
 
 .rd-credit-note {
   margin: 4px 0 0;
