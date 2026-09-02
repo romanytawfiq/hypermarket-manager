@@ -93,6 +93,10 @@ const productSchema = new mongoose.Schema<Product>(
 
 // Common operational lookup: active products by name, and by category.
 productSchema.index({ active: 1, name: 1 });
+// Online-store browsing: filter by online visibility + active + category, then
+// sort by name. Bounded (paginated) queries — the public catalog is never fully
+// loaded into the browser (Phase 9.2).
+productSchema.index({ onlineVisible: 1, active: 1, category: 1, name: 1 });
 
 export const ProductModel: Model<Product> =
   (mongoose.models.Product as Model<Product> | undefined) ??

@@ -407,7 +407,43 @@ Avoids dual-maintenance drift, stock conflicts, and inconsistent pricing (`BR-04
 - Public reads touch shared collections, so read-optimized projections and caching are needed to isolate public traffic from internal writes.
 
 ### Flow
-Browse → search → view → cart → checkout → address → delivery → payment → order → delivery statuses. The online order lifecycle is explicit and auditable.
+Browse → search → view → cart → checkout → address → payment → order → delivery statuses. The online order lifecycle is explicit and auditable.
+
+### Payments (Phase 9.2 / 9.3)
+- COD is the default. Optional **online payment** uses the **Kashier** Payment
+  Sessions API v3; it is offered only when the merchant configures
+  `KASHIER_API_KEY`/`KASHIER_SECRET_KEY`/`KASHIER_MERCHANT_ID`
+  (`KASHIER_MODE` selects test/live). Specific methods (Vodafone Cash/InstaPay)
+  are never fabricated or hard-coded — the customer picks the actual method
+  inside Kashier's hosted page.
+- Checkout creates the order transactionally, then (ONLINE only) creates the
+  Kashier session **after commit** so no DB transaction spans an external call.
+- A **pending payment reference** (`sessionId`/`paymentToken`/`initiatedAt`) is
+  persisted on the order at session creation (Phase 9.3), so it survives a
+  redirect/refresh and is never forged by the client.
+- The authoritative capture is the **verified server webhook**
+  (`/api/payments/kashier-webhook` → HMAC-SHA256 over the payload's
+  `signatureKeys`, constant-time) which flips the order to `PAID_ONLINE`. The
+  browser return page (`/store/payment/return`) is UX only. If session
+  initialization fails, the order stays unpaid — no fabricated success.
+- Online orders post a non-cash `ONLINE` Sale at delivery into the deliverer's
+  open shift, so revenue joins Sale-based reporting without affecting till cash.
+- The storefront shows exactly one config-aware electronic option
+  («الدفع الإلكتروني عبر كاشير») only when configured; otherwise a clear message
+  explains electronic payment is unavailable and COD remains.
+
+### Catalog search
+Server-side, bounded search/filter/pagination (`searchOnlineProducts`,
+`getOnlineCategories`) backed by the `{onlineVisible, active, category, name}`
+index. The full catalogue is never loaded into the browser. Phase 9.3 adds brand
+name + logo to the product DTO via selective `.populate("brand", "name logo")`
+(no N+1, no full-catalog load).
+
+### Brand logos (Phase 9.3)
+The `Brand` model gains an optional `logo` stored inline as a **data-URI**
+image, validated server-side (supported raster mime + ≤ 512 KB decoded). Stored
+inline to avoid adding upload/hosting dependencies; rendered on the storefront
+product card/detail with a text-initials fallback.
 
 ### Stock interaction
 A stock **reservation** mechanism is recommended so two customers cannot claim the same last unit; reservations are released on cancellation or failure.
@@ -566,7 +602,7 @@ The following business decisions must be resolved before implementation of their
 | Receipt content / format | Name, items, unit price, qty, totals, payment split, invoice no., date | Printing, invoice numbering |
 | Invoice / order numbering | Atomic sequence per day/shop | Sequence/counter collection |
 | Printer models | 58mm + 80mm; validate Arabic rendering | Printing strategy |
-| Payment method set | Cash, Visa, Mastercard, InstaPay, Vodafone Cash, Other | Config, POS, reports |
+| Payment method set | Cash, Visa, Mastercard, InstaPay, Vodafone Cash, Online (electronic), Other | Config, POS, reports |
 | Shift approval on variance | Manager review above threshold | Shift close workflow |
 | Delivery employee role | Introduce when delivery phase begins | RBAC roles |
 

@@ -38,6 +38,8 @@ export interface BrandDto {
   id: string;
   name: string;
   active: boolean;
+  /** Brand logo data-URI (empty string when none). */
+  logo: string;
   productCount: number;
 }
 
@@ -199,6 +201,7 @@ export async function listBrands(
     id: b._id.toString(),
     name: b.name,
     active: b.active,
+    logo: b.logo ?? "",
     productCount: countMap.get(b._id.toString()) ?? 0,
   }));
 }
@@ -210,16 +213,20 @@ export async function createBrand(actor: AuthUser | null, input: BrandInput): Pr
   if (await BrandModel.exists({ name: input.name })) {
     throw new AppError("CONFLICT", "توجد علامة تجارية بنفس الاسم بالفعل");
   }
-  const brand = await BrandModel.create({ name: input.name, active: input.active ?? true });
+  const brand = await BrandModel.create({
+    name: input.name,
+    active: input.active ?? true,
+    logo: input.logo ?? "",
+  });
   await recordAudit({
     actorId: authed.id,
     actorUsername: authed.username,
     action: "brand.created",
     entity: "brand",
     entityId: brand._id.toString(),
-    after: { name: brand.name, active: brand.active },
+    after: { name: brand.name, active: brand.active, hasLogo: Boolean(brand.logo) },
   });
-  return { id: brand._id.toString(), name: brand.name, active: brand.active, productCount: 0 };
+  return { id: brand._id.toString(), name: brand.name, active: brand.active, logo: brand.logo ?? "", productCount: 0 };
 }
 
 /** Updates a brand. Requires `brands.manage`. */
@@ -233,6 +240,7 @@ export async function updateBrand(actor: AuthUser | null, id: string, input: Bra
   }
   brand.name = input.name;
   if (input.active !== undefined) brand.active = input.active;
+  if (input.logo !== undefined) brand.logo = input.logo;
   await brand.save();
   await recordAudit({
     actorId: authed.id,
@@ -240,9 +248,9 @@ export async function updateBrand(actor: AuthUser | null, id: string, input: Bra
     action: "brand.updated",
     entity: "brand",
     entityId: brand._id.toString(),
-    after: { name: brand.name, active: brand.active },
+    after: { name: brand.name, active: brand.active, hasLogo: Boolean(brand.logo) },
   });
-  return { id: brand._id.toString(), name: brand.name, active: brand.active, productCount: 0 };
+  return { id: brand._id.toString(), name: brand.name, active: brand.active, logo: brand.logo ?? "", productCount: 0 };
 }
 
 /** Deactivates a brand (keeps record). Requires `brands.manage`. */
@@ -260,7 +268,7 @@ export async function deactivateBrand(actor: AuthUser | null, id: string): Promi
     entity: "brand",
     entityId: brand._id.toString(),
   });
-  return { id: brand._id.toString(), name: brand.name, active: false, productCount: 0 };
+  return { id: brand._id.toString(), name: brand.name, active: false, logo: brand.logo ?? "", productCount: 0 };
 }
 
 /* ------------------------------------------------------------------ */

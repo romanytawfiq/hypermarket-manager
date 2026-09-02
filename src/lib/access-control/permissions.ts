@@ -99,6 +99,13 @@ export const PERMISSIONS = [
   "cafe.orders.cancel",
   "cafe.orders.status",
   "cafe.kds.view",
+
+  // Online Store & Delivery (Phase 9)
+  "online.orders.read",
+  "online.orders.manage",
+  "online.products.read",
+  "delivery.orders.read",
+  "delivery.orders.update",
 ] as const;
 
 export type PermissionId = (typeof PERMISSIONS)[number];

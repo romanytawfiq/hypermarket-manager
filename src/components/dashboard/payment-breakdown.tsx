@@ -19,6 +19,7 @@ const METHOD_ICONS: Record<PaymentMethod, string> = {
   MASTERCARD: "💳",
   INSTAPAY: "📱",
   VODAFONE_CASH: "📱",
+  ONLINE: "🖥️",
   OTHER: "💰",
 };
 

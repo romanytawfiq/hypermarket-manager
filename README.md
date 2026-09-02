@@ -6,9 +6,8 @@ Nexa Retail is a **full-stack Retail & Café Management Platform** designed for 
 
 The platform is **Arabic-first**: the default locale is `ar-EG` and the default text direction is **RTL**. All user-facing interfaces are designed for Arabic from the beginning, not translated afterward.
 
-> **Status: Phase 7.1 Complete (Café / KDS)**
-> Phases 0–6 plus the Dashboard Overview redesign and the POS camera barcode scanner are complete, and now **Phase 7 — Café Orders & Barista KDS** plus **Phase 7.1 — café payment integration & per-cup sugar options** are implemented: cashier café-order creation with per-cup sugar levels and payment at checkout (Sale + payments + inventory + shift effect commit atomically with the order), a barista Kitchen Display System, and server-authoritative realtime via a transactional outbox + SSE. See [Development Status](#development-status).
-> Phases 0–6 are implemented (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting). The Dashboard Overview redesign (role-aware business analytics, KPIs, sales trends, inventory alerts, financial summaries) and the POS **camera barcode scanner** are complete. See [Development Status](#development-status).
+> **Status: Phase 9 Complete (Online Store & Delivery)**
+> Phases 0–7.1 (foundation → identity/RBAC → catalog/inventory → suppliers/purchasing → POS & shifts → customer credit → expenses & accounting → Dashboard Overview → café/KDS → café payment integration) are implemented. **Phase 9 — Online Store & Delivery** is now implemented: a public Arabic-first `/store` front (guest cart, checkout, COD), an explicit online-order state machine with inventory reservation, a DELIVERY role and delivery board, admin order management, guest tracking, SEO and checkout rate limiting. See [Development Status](#development-status).
 
 ---
 
@@ -239,7 +238,7 @@ The project is documented across the `docs/` folder:
 
 ## Development Status
 
-Phases 0–7 are implemented and the test suite passes (137 tests across 18 files). The Dashboard Overview redesign is complete.
+Phases 0–7.1 are implemented and the test suite passes (180 tests across 21 files). Phase 9 (Online Store & Delivery) is implemented. The Dashboard Overview redesign is complete.
 
 | Phase | Status |
 |-------|--------|
@@ -252,8 +251,9 @@ Phases 0–7 are implemented and the test suite passes (137 tests across 18 file
 | **6 — Expenses & Accounting** | ✅ Complete |
 | **Dashboard Overview** | ✅ Complete |
 | **7 — Café / KDS** | ✅ Complete |
+| **7.1 — Café Payment Integration & Per-Cup Sugar** | ✅ Complete |
 | **8 — Printing** | Planned |
-| **9 — Online Store & Delivery** | Planned |
+| **9 — Online Store & Delivery** | ✅ Complete |
 | **10 — Reports & Audit** | Planned |
 | **11 — Production Hardening** | Planned |
 
@@ -287,6 +287,10 @@ Cashier café-order creation and a barista **Kitchen Display System** (`/kds`) w
 
 Creating a café order now posts the **financial Sale** in the same MongoDB transaction as the order: payments (full payment; mixed methods supported, cash tendered + change), sellable-stock deduction, customer snapshot, and the cashier-shift effect all commit atomically — no second ledger, and `CafeOrder.totalAmount` can never diverge from `Sale.total`. The order stores a stable `saleId` link + the invoice number (`INV-…`). **Per-cup sugar** is a first-class structured option (سادة / ريحة / مزبوط / مانو / زيادة / فوق الزيادة / كراميل): different-sugar cups are always separate order lines (never merged) and products must advertise `supportsSugarOptions` to accept a sugar choice. Cancellation remains operational — the linked Sale is never mutated.
 
+### Phase 9 — Online Store & Delivery (Implemented)
+
+A public, Arabic-first (RTL) online storefront at `/store` sharing the same product/catalog domain. Guest cart (Zustand + localStorage) and one-page checkout with **Cash on Delivery** (COD only in this phase). Orders follow an explicit server-validated state machine (`PENDING → CONFIRMED → PREPARING → READY_FOR_DELIVERY → OUT_FOR_DELIVERY → DELIVERED`, any active → `CANCELLED`) with optimistic concurrency and an immutable `statusHistory`. **Inventory is reserved at checkout and committed at delivery** via a new `InventoryReservation` ledger (no overselling; cancelled orders release stock). A dedicated **DELIVERY** role drives the delivery board (`/delivery`): dispatch, and **COD collection posts the financial Sale into the collector's open cashier shift** (repurposing `createSaleWithSession`) so the collected cash enters shift accounting — the order stays unpaid until that real Sale exists. Admin order management at `/online-orders`, guest order tracking via a server-generated token (no IDOR), SEO (robots/sitemap, indexable store vs noindex dashboard), and a rate limiter on checkout. See [docs/online-store.md](docs/online-store.md).
+
 The phased development roadmap is defined in [docs/architecture.md](docs/architecture.md#development-roadmap).
 
 ---
@@ -304,6 +308,13 @@ npm install
 # Re-running adds any newly-introduced phase permissions to already-seeded
 # roles (additive merge) without removing manual role edits.
 npm run seed
+
+# Seed the online store catalogue (1065 realistic supermarket/café products,
+# 959 visible online, with initial stock via PURCHASE movements).
+# Idempotent — safe to re-run; new products are added without overwriting
+# existing ones. Includes: Egyptian brands, expiry tracking, Arabic names,
+# deterministic EAN-13 barcodes, and repeatable inventory profiles.
+npm run seed:store
 
 # Run the development server
 npm run dev
@@ -325,3 +336,17 @@ Owner's password hash and re-hashes it if the stored value cannot be verified,
 so a corrupted/plaintext hash is repaired automatically.
 
 > The application is Arabic-first and RTL. Phases 0–7 are implemented; the foundation, identity/RBAC, catalog/inventory, suppliers/purchasing, POS & shifts, customer credit, expenses & accounting, and café orders / barista KDS features are functional.
+
+### Phase 9.1 — Store catalogue seed (Implemented)
+
+`npm run seed:store` seeds a realistic Egyptian supermarket & café catalogue
+(1065 products, 959 visible online) so the public store instantly has
+content. It is **idempotent and non-destructive**: products are matched by
+their deterministic EAN-13 barcode, so re-runs only add what's missing and
+never overwrite existing products, stock, or prices. Initial stock is recorded
+through the same invariants the inventory service enforces for a real purchase
+receipt — `InventoryState.onHand` set to the received quantity, an append-only
+`PURCHASE` `StockMovement`, and future-dated `ProductBatch` rows for
+expiry-tracked items — so product stock equals `InventoryState.onHand` and the
+ledger stays auditable. Bulk writes keep a 1000+ product catalogue fast and
+reliable even on standalone local MongoDB. See [docs/online-store.md](docs/online-store.md#store-catalogue-seed).

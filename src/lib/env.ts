@@ -35,6 +35,28 @@ const envSchema = z.object({
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
+
+  /**
+   * Kashier payment gateway (online store, Phase 9.2).
+   *
+   * All credentials are OPTIONAL so the merchant can ship with COD-only
+   * checkout and enable electronic payment later by supplying the keys +
+   * merchant id. Online payment is only offered when every one of
+   * KASHIER_API_KEY / KASHIER_SECRET_KEY / KASHIER_MERCHANT_ID is set.
+   *
+   * KASHIER_MODE selects the API base URL: "test" → https://test-api.kashier.io,
+   * "live" → https://api.kashier.io.
+   *
+   * KASHIER_WEBHOOK_SIGNING_KEY is the key Kashier uses to sign webhook
+   * notifications (configured in the Kashier dashboard Webhook settings). It is
+   * often distinct from the payment API key; the server verifies every webhook
+   * against it.
+   */
+  KASHIER_MODE: z.enum(["test", "live"]).default("test"),
+  KASHIER_API_KEY: z.string().optional(),
+  KASHIER_SECRET_KEY: z.string().optional(),
+  KASHIER_MERCHANT_ID: z.string().optional(),
+  KASHIER_WEBHOOK_SIGNING_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse({
@@ -43,6 +65,11 @@ const parsed = envSchema.safeParse({
   AUTH_SECRET: process.env.AUTH_SECRET,
   SESSION_TTL_DAYS: process.env.SESSION_TTL_DAYS,
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+  KASHIER_MODE: process.env.KASHIER_MODE,
+  KASHIER_API_KEY: process.env.KASHIER_API_KEY,
+  KASHIER_SECRET_KEY: process.env.KASHIER_SECRET_KEY,
+  KASHIER_MERCHANT_ID: process.env.KASHIER_MERCHANT_ID,
+  KASHIER_WEBHOOK_SIGNING_KEY: process.env.KASHIER_WEBHOOK_SIGNING_KEY,
 });
 
 if (!parsed.success) {

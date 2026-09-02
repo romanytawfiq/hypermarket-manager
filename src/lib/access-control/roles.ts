@@ -10,7 +10,7 @@ import { PERMISSIONS, type PermissionId } from "@/lib/access-control/permissions
  * Owner is the highest privilege role and, by default, holds every permission.
  */
 
-export const ROLES = ["OWNER", "MANAGER", "CASHIER", "ACCOUNTANT", "WAREHOUSE_EMPLOYEE", "BARISTA"] as const;
+export const ROLES = ["OWNER", "MANAGER", "CASHIER", "ACCOUNTANT", "WAREHOUSE_EMPLOYEE", "BARISTA", "DELIVERY"] as const;
 
 export type RoleId = (typeof ROLES)[number];
 
@@ -22,6 +22,7 @@ export const ROLE_LABELS: Record<RoleId, string> = {
   ACCOUNTANT: "محاسب",
   WAREHOUSE_EMPLOYEE: "مسؤول المخزن",
   BARISTA: "باريستا",
+  DELIVERY: "مندوب توصيل",
 };
 
 /** Returns the Arabic label for a role, or an empty string when unknown. */
@@ -110,6 +111,11 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "cafe.orders.cancel",
     "cafe.orders.status",
     "cafe.kds.view",
+    // Online Store & Delivery (Phase 9)
+    "online.orders.read",
+    "online.orders.manage",
+    "delivery.orders.read",
+    "delivery.orders.update",
   ],
   WAREHOUSE_EMPLOYEE: [
     "products.read",
@@ -191,6 +197,22 @@ const ROLE_DEFAULT_PERMISSIONS: Record<RoleId, readonly PermissionId[]> = {
     "cafe.orders.read",
     "cafe.orders.status",
     "cafe.kds.view",
+  ],
+  DELIVERY: [
+    // Online Store & Delivery (Phase 9) — delivery left-pane workflow.
+    // A delivery employee views the orders assigned to fulfilling delivery and
+    // advances their delivery status + marks COD collected at delivery.
+    "delivery.orders.read",
+    "delivery.orders.update",
+    "online.orders.read",
+    "receipts.print",
+    // COD collection posts the collected cash as a Sale into the collector's
+    // OPEN cashier shift (BR: no fabricated payment success). A delivery
+    // employee who collects cash therefore needs a shift + sale permissions.
+    "sales.create",
+    "sales.read",
+    "shifts.open",
+    "shifts.read",
   ],
 };
 

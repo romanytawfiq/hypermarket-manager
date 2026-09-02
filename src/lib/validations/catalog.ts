@@ -20,7 +20,40 @@ export type CategoryInput = z.infer<typeof categorySchema>;
 export const brandSchema = z.object({
   name: z.string().trim().min(1, "أدخل اسم العلامة التجارية").max(120, "الاسم طويل جدًا"),
   active: z.boolean().optional(),
+  /** Brand logo as a data-URI image (optional). Validated for a supported raster
+   *  mime type and a capped decoded size to avoid abusing the document. */
+  logo: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (v) => {
+        if (!v) return true;
+        if (!v.startsWith("data:image/")) return false;
+        const semicolon = v.indexOf(";");
+        const mime = semicolon > -1 ? v.slice(5, semicolon) : "";
+        return ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime);
+      },
+      "صيغة صورة الشعار غير مدعومة. استخدم PNG أو JPG أو WEBP أو GIF",
+    )
+    .refine(
+      (v) => {
+        if (!v) return true;
+        const size = estimateDataUriBytes(v);
+        return size <= 512 * 1024; // 512 KB decoded
+      },
+      "حجم صورة الشعار كبير جدًا. اختر صورة أصغر من 512 ك.ب",
+    ),
 });
+
+/** Approximates decoded size (bytes) of a base64 data-URI body. */
+function estimateDataUriBytes(uri: string): number {
+  const comma = uri.indexOf(",");
+  if (comma === -1) return uri.length;
+  const base64 = uri.slice(comma + 1);
+  // base64 length * 3/4 ≈ decoded bytes (ignores padding).
+  return Math.floor((base64.length * 3) / 4);
+}
 
 export type BrandInput = z.infer<typeof brandSchema>;
 

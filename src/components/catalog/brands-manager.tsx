@@ -146,7 +146,24 @@ function BrandRow({
 
   return (
     <TableRow>
-      <TableCell className="font-medium">{item.name}</TableCell>
+      <TableCell className="font-medium">
+        <span className="flex items-center gap-2.5">
+          {item.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={item.logo}
+              alt={`شعار ${item.name}`}
+              className="size-8 shrink-0 rounded-md border bg-muted object-contain p-0.5"
+              loading="lazy"
+            />
+          ) : (
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted text-xs font-semibold text-muted-foreground">
+              {item.name.trim().charAt(0)}
+            </span>
+          )}
+          {item.name}
+        </span>
+      </TableCell>
       <TableCell className="text-muted-foreground">{item.productCount}</TableCell>
       <TableCell>
         <span
@@ -185,13 +202,35 @@ function BrandRow({
 
 function BrandForm({ item, onSuccess }: { item?: BrandDto; onSuccess: () => void }) {
   const [name, setName] = useState(item?.name ?? "");
+  const [logo, setLogo] = useState(item?.logo ?? "");
+  const [logoError, setLogoError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [pending, startTransition] = useTransition();
 
+  const readLogo = (file: File | undefined) => {
+    setLogoError(undefined);
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setLogoError("اختر ملف صورة صالح (PNG أو JPG أو WEBP أو GIF)");
+      return;
+    }
+    if (file.size > 512 * 1024) {
+      setLogoError("حجم صورة الشعار كبير جدًا. اختر صورة أصغر من 512 ك.ب");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setLogo(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const submit = () => {
     setActionError(undefined);
+    setLogoError(undefined);
+    if (!name.trim()) return;
     startTransition(async () => {
-      const input = { name };
+      const input = { name, logo };
       const result = item
         ? await updateBrandAction(item.id, input)
         : await createBrandAction(input);
@@ -226,6 +265,45 @@ function BrandForm({ item, onSuccess }: { item?: BrandDto; onSuccess: () => void
           onChange={(e) => setName(e.target.value)}
           placeholder="مثال: بيبسي"
         />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="brand-logo">شعار العلامة (اختياري)</Label>
+        <div className="flex items-center gap-3">
+          <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+            {logo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logo} alt="معاينة الشعار" className="size-full object-contain p-1" />
+            ) : (
+              <span className="text-xs text-muted-foreground">—</span>
+            )}
+          </div>
+          <div className="flex flex-1 flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
+              اختر صورة
+              <input
+                id="brand-logo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only"
+                onChange={(e) => readLogo(e.target.files?.[0])}
+              />
+            </label>
+            {logo ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setLogo("")}>
+                إزالة الشعار
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        {logoError ? (
+          <p className="text-xs text-destructive" role="alert">
+            {logoError}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            PNG أو JPG أو WEBP أو GIF، بحد أقصى 512 ك.ب.
+          </p>
+        )}
       </div>
       <div className="flex justify-end gap-2 pt-1">
         <Button type="submit" disabled={pending || name.trim() === ""}>

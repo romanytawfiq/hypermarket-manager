@@ -13,6 +13,7 @@ export const PAYMENT_METHODS = [
   "MASTERCARD",
   "INSTAPAY",
   "VODAFONE_CASH",
+  "ONLINE",
   "OTHER",
 ] as const;
 
@@ -25,6 +26,7 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   MASTERCARD: "ماستركارد",
   INSTAPAY: "إنستا باي",
   VODAFONE_CASH: "فودافون كاش",
+  ONLINE: "دفع إلكتروني",
   OTHER: "أخرى",
 };
 

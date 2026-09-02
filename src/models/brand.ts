@@ -9,6 +9,9 @@ export interface Brand {
   name: string;
   /** Whether the brand is currently selectable for new products. */
   active: boolean;
+  /** Brand logo as a data-URI image (optional). Stored inline so no external
+   *  hosting/upload infra is required; validated server-side for mime + size. */
+  logo?: string;
 }
 
 export type BrandDocument = Brand &
@@ -24,6 +27,7 @@ const brandSchema = new mongoose.Schema<Brand>(
       index: true,
     },
     active: { type: Boolean, default: true },
+    logo: { type: String, trim: true, default: "" },
   },
   { timestamps: true },
 );

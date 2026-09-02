@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { AppError } from "@/lib/errors";
+import { brandSchema } from "@/lib/validations/catalog";
 import {
   createCategory,
   updateCategory,
   listCategories,
   createBrand,
+  updateBrand,
+  listBrands,
   createProduct,
   updateProduct,
   setProductActive,
@@ -215,6 +218,63 @@ describe("catalog / products", () => {
     });
     const stock = await getSellableStock(p.id, false);
     expect(stock.sellable).toBe(0);
+  });
+});
+
+describe("brand logo (data-URI) CRUD", () => {
+  let manager: Awaited<ReturnType<typeof buildAuthUser>>;
+  let cashier: Awaited<ReturnType<typeof buildAuthUser>>;
+
+  const PNG_URI =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+  beforeAll(async () => {
+    await resetDb();
+    manager = await managerActor();
+    cashier = await cashierActor();
+  });
+
+  it("creates a brand with a logo and lists it back", async () => {
+    const brand = await createBrand(manager, { name: "شعارالبيان", logo: PNG_URI });
+    expect(brand.logo).toBe(PNG_URI);
+
+    const list = await listBrands(manager);
+    const found = list.find((b) => b.id === brand.id);
+    expect(found?.logo).toBe(PNG_URI);
+  });
+
+  it("updates a brand's logo and removes it", async () => {
+    const brand = await createBrand(manager, { name: "علامة تحديث الشعار" });
+    expect(brand.logo).toBe("");
+
+    const withLogo = await updateBrand(manager, brand.id, { name: "علامة تحديث الشعار", logo: PNG_URI });
+    expect(withLogo.logo).toBe(PNG_URI);
+
+    const removed = await updateBrand(manager, brand.id, { name: "علامة تحديث الشعار", logo: "" });
+    expect(removed.logo).toBe("");
+  });
+
+  it("rejects a brand logo with an unsupported mime type (server validation)", async () => {
+    const parsed = brandSchema.safeParse({
+      name: "شعار غير مدعوم",
+      logo: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects an oversized brand logo (server validation)", async () => {
+    const big = `data:image/png;base64,${"A".repeat(700 * 1024)}`;
+    const parsed = brandSchema.safeParse({ name: "شعار كبير", logo: big });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts a valid brand logo through the server schema", async () => {
+    const parsed = brandSchema.safeParse({ name: "شعار صالح", logo: PNG_URI });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects brand management for users without the manage permission", async () => {
+    await expect(createBrand(cashier, { name: "ممنوع" })).rejects.toBeInstanceOf(AppError);
   });
 });
 

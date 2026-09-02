@@ -1,4 +1,5 @@
 import {
+  BikeIcon,
   BoxesIcon,
   CalculatorIcon,
   ChefHatIcon,
@@ -12,6 +13,7 @@ import {
   ReceiptIcon,
   SheetIcon,
   ShoppingCartIcon,
+  StoreIcon,
   TagsIcon,
   TruckIcon,
   UsersIcon,
@@ -53,6 +55,8 @@ export type NavigationIcon =
   | "accounting"
   | "cafe"
   | "kds"
+  | "online"
+  | "delivery"
   | "users";
 
 /** Latest set of icons used by navigation; rendered by the client and server. */
@@ -75,6 +79,8 @@ export const iconMap: Record<NavigationIcon, LucideIcon> = {
   accounting: CalculatorIcon,
   cafe: CoffeeIcon,
   kds: ChefHatIcon,
+  online: StoreIcon,
+  delivery: BikeIcon,
   users: UsersIcon,
 };
 
@@ -112,6 +118,9 @@ export const NAV_ITEMS: NavItem[] = [
   // Café Orders & Barista KDS (Phase 7)
   { href: "/cafe", label: "الكافيه", icon: "cafe", permission: "cafe.orders.read" },
   { href: "/kds", label: "شاشة الباريستا", icon: "kds", permission: "cafe.kds.view" },
+  // Online Store & Delivery (Phase 9)
+  { href: "/online-orders", label: "الطلبات", icon: "online", permission: "online.orders.read" },
+  { href: "/delivery", label: "التوصيل", icon: "delivery", permission: "delivery.orders.read" },
   // Admin
   { href: "/users", label: "المستخدمون", icon: "users", permission: "users.read" },
 ];

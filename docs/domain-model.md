@@ -497,23 +497,47 @@ The outbox + SSE design (see architecture §15, §15b): the server is authoritat
 
 ## OnlineOrder
 
-Represents an order created by an online customer.
+Represents a guest order created through the public online store (Phase 9).
+Implemented in `src/models/online-order.ts`.
 
-Potential information:
+- `orderNumber` — `ON-YYYYMMDD-NNNN` (atomic sequence).
+- `customerName`, `customerEmail`, `customerPhone`.
+- `deliveryAddress` — snapshot (`fullName/phone/city/area/street/landmark/notes`).
+- `items[]` — snapshot of `productId`, `productName`, `unitPrice`, `quantity`,
+  `lineTotal`, `reservedQuantity`.
+- `totalAmount` (subtotal), `deliveryFee`, `payableAmount` (= total + fee).
+- `status` — `PENDING → CONFIRMED → PREPARING → READY_FOR_DELIVERY →
+  OUT_FOR_DELIVERY → DELIVERED`, any active → `CANCELLED`.
+- `paymentState` — `PAYMENT_PENDING | PAID_AT_DELIVERY` (COD only).
+- `paymentCollected`, `saleId`, `invoiceNumber`, `codCollectedAt` — the
+  immutable Sale posted at COD collection (order is NOT a Sale until then).
+- `assignedTo { id, username }` — delivery employee.
+- `trackingToken` — per-order secret returned once at checkout (guest tracking).
+- `version` — optimistic concurrency counter; `statusHistory[]` — immutable
+  audit trail.
+- `idempotencyKey` — duplicate-submit guard (also guards double COD posting).
+- `createdBy`, `cancelledAt`, `deliveredAt`.
 
-- customer
-- items
-- address
-- totals
-- delivery fee
-- payment
-- order state
+## InventoryReservation
+
+Holds stock for an online order between checkout and delivery/cancel.
+Implemented in `src/models/inventory-reservation.ts`.
+
+- `product`, `onlineOrder`, `orderNumber`, `quantity`.
+- `status` — `RESERVED | FULFILLED | RELEASED | EXPIRED`.
+- `reservationKey`, `expiresAt` (1h TTL), `reservedAt`, `fulfilledAt`,
+  `releasedAt`.
+
+Availability = `currentSellable − active RESERVED reservations`. Reservations do
+not decrement `onHand`; the Sale at COD collection consumes the actual stock.
 
 ## Cart
 
-Represents a customer's temporary shopping state.
+Guest cart (Phase 9) is client-side Zustand + localStorage (`nexa-store-cart`)
+holding `productId`, `quantity`, display `unitPrice/unit/available`. Display
+only — the server recomputes and validates all prices/totals at checkout.
 
-The final persistence model depends on authentication and guest-cart requirements.
+See `docs/online-store.md` for full details.
 
 ---
 
@@ -521,16 +545,17 @@ The final persistence model depends on authentication and guest-cart requirement
 
 ## DeliveryOrder
 
-Represents delivery information associated with an online order.
+Delivery information is modelled as fields on `OnlineOrder` (no separate
+collection in Phase 9): `assignedTo`, status via the shared order state machine,
+and `codCollectedAt`/`deliveredAt` timestamps.
 
-Potential information:
+- Delivery workflow list (`READY_FOR_DELIVERY | OUT_FOR_DELIVERY`, plus
+  assigned non-terminal orders for a DELIVERY employee) in
+  `listDeliveryOrders`.
+- Dispatch (`OUT_FOR_DELIVERY`) requires `delivery.orders.update`.
+- COD collection posts a Sale into the collector's open shift and delivers.
 
-- order
-- address
-- delivery fee
-- assigned employee
-- status
-- timestamps
+See `docs/online-store.md` for full details.
 
 ---
 

@@ -14,6 +14,12 @@ export default defineConfig({
       // actually connect override this with an available URI.
       MONGODB_URI: "mongodb://127.0.0.1:27017/nexa-retail-test",
       NODE_ENV: "test",
+      // Enable the ONLINE payment path in tests. The gateway HTTP call is stubbed
+      // per-test so no real network request is made (see online-store.test.ts).
+      KASHIER_MODE: "test",
+      KASHIER_API_KEY: "test-api-key",
+      KASHIER_SECRET_KEY: "test-secret-key",
+      KASHIER_MERCHANT_ID: "MID-test-000",
     },
   },
   resolve: {

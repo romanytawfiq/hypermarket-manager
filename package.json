@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed.ts",
+    "seed:store": "tsx scripts/seed-store.ts",
     "migrate:category-sugar": "tsx scripts/migrate-category-sugar.ts"
   },
   "dependencies": {
