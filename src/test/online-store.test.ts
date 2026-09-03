@@ -499,11 +499,33 @@ describe("Phase 9 — Online store & delivery", () => {
       const order = await createOnlineOrder(
         checkoutInput({ items: [{ productId: pid, quantity: 1 }], idempotencyKey: "date-range-1" }),
       );
-      const day = order.order.createdAt.slice(0, 10);
+
+      // The order is persisted with a UTC `createdAt`. Derive a local-time
+      // `from`/`to` that is guaranteed to bound it, independent of the host
+      // timezone (previously `day + "T23:59:59"` was parsed as local time and
+      // could fall short of a late-night UTC createdAt, making the test flaky).
+      const createdDate = new Date(order.order.createdAt);
+      const from = new Date(
+        createdDate.getFullYear(),
+        createdDate.getMonth(),
+        createdDate.getDate(),
+        0,
+        0,
+        0,
+      );
+      const to = new Date(
+        createdDate.getFullYear(),
+        createdDate.getMonth(),
+        createdDate.getDate(),
+        23,
+        59,
+        59,
+        999,
+      );
 
       const inRange = await listOnlineOrdersPage(manager, {
-        from: `${day}T00:00:00`,
-        to: `${day}T23:59:59`,
+        from: from.toISOString(),
+        to: to.toISOString(),
       });
       expect(inRange.items.map((o) => o.id)).toContain(order.order.id);
 

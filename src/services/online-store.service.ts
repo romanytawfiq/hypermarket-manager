@@ -21,7 +21,7 @@ import {
   InventoryReservationModel,
   type ReservationStatus,
 } from "@/models/inventory-reservation";
-import { nextSequenceValue } from "@/models/sequence";
+import { dayKeyedNumber } from "@/models/sequence";
 import { createSaleWithSession } from "@/services/sales.service";
 import {
   createPaymentSession,
@@ -35,6 +35,8 @@ import type {
 } from "@/lib/validations/online-store";
 import { getSellableStock } from "@/services/inventory.service";
 import { env } from "@/lib/env";
+import { escapeRegExp } from "@/lib/utils";
+import { assertValidObjectId } from "@/lib/validations/shared";
 
 /**
  * Online store & delivery service (Phase 9).
@@ -202,12 +204,6 @@ function toOnlineOrderDto(o: OnlineOrderDocument): OnlineOrderDto {
     })),
     createdAt: o.createdAt ? new Date(o.createdAt as unknown as Date).toISOString() : "",
   };
-}
-
-function assertValidId(id: string, message: string): void {
-  if (!mongoose.isValidObjectId(id)) {
-    throw new AppError("NOT_FOUND", message);
-  }
 }
 
 /* ---------------------------------------------------------------- *
@@ -385,11 +381,6 @@ export interface OnlineCategoryDto {
   name: string;
 }
 
-/** Escapes user input so it is treated as a literal regex, never a pattern. */
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * Server-side, bounded catalog query. This is the single public listing function
  * for the storefront: it never loads the whole catalog into the browser. Instead
@@ -420,7 +411,7 @@ export async function searchOnlineProducts(
   // are page-bounded.
   let nameRegex: RegExp | undefined;
   if (query.search && query.search.trim().length > 0) {
-    nameRegex = new RegExp(`^${escapeRegex(query.search.trim())}`, "i");
+    nameRegex = new RegExp(`^${escapeRegExp(query.search.trim())}`, "i");
     filter.name = nameRegex;
   }
 
@@ -669,9 +660,7 @@ export async function createOnlineOrder(
 
     // Concurrency-safe order number.
     const now = new Date();
-    const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-    const seq = await nextSequenceValue(`online-order-${dayKey}`, session);
-    const orderNumber = `${ORDER_PREFIX}-${dayKey}-${String(seq).padStart(4, "0")}`;
+    const orderNumber = await dayKeyedNumber(ORDER_PREFIX, "online-order", session, now);
     const trackingToken = crypto.randomUUID();
 
     const [order] = await OnlineOrderModel.create(
@@ -987,7 +976,7 @@ export async function listOnlineOrdersPage(
   }
 
   if (query.search && query.search.trim().length > 0) {
-    const q = escapeRegex(query.search.trim());
+    const q = escapeRegExp(query.search.trim());
     const re = new RegExp(q, "i");
     (filter as Record<string, unknown>).$or = [
       { orderNumber: re },
@@ -1023,7 +1012,7 @@ export async function getOnlineOrder(
 ): Promise<OnlineOrderDto> {
   requirePermission(actor, "online.orders.read");
   await dbConnect();
-  assertValidId(id, "الطلب غير موجود");
+  assertValidObjectId(id, "الطلب غير موجود");
   const order = await OnlineOrderModel.findById(id).lean<OnlineOrderDocument>();
   if (!order) throw new AppError("NOT_FOUND", "الطلب غير موجود");
   return toOnlineOrderDto(order);
@@ -1070,7 +1059,7 @@ export async function transitionOnlineOrder(
   input: OnlineTransitionInput,
 ): Promise<OnlineOrderDto> {
   await dbConnect();
-  assertValidId(input.orderId, "الطلب غير موجود");
+  assertValidObjectId(input.orderId, "الطلب غير موجود");
 
   // Determine authorization before reading state: delivery-dispatch targets
   // require `delivery.orders.update`, every other transition requires the admin
@@ -1154,7 +1143,7 @@ export async function assignOnlineOrder(
 ): Promise<OnlineOrderDto> {
   requirePermission(actor, "online.orders.manage");
   await dbConnect();
-  assertValidId(input.orderId, "الطلب غير موجود");
+  assertValidObjectId(input.orderId, "الطلب غير موجود");
 
   const assignedTo =
     input.employeeId && input.employeeUsername
@@ -1217,7 +1206,7 @@ export async function collectCodAndDeliver(
     throw new AppError("FORBIDDEN", "ليس لديك صلاحية لتنفيذ هذا الإجراء");
   }
   await dbConnect();
-  assertValidId(orderId, "الطلب غير موجود");
+  assertValidObjectId(orderId, "الطلب غير موجود");
 
   return withTransaction(async (session) => {
     const order = await OnlineOrderModel.findById(orderId)
@@ -1404,7 +1393,7 @@ export async function deliverPaidOnlineOrder(
     throw new AppError("FORBIDDEN", "ليس لديك صلاحية لتنفيذ هذا الإجراء");
   }
   await dbConnect();
-  assertValidId(orderId, "الطلب غير موجود");
+  assertValidObjectId(orderId, "الطلب غير موجود");
 
   return withTransaction(async (session) => {
     const order = await OnlineOrderModel.findById(orderId)

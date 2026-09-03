@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { dbConnect, withTransaction } from "@/lib/db";
 import { requirePermission } from "@/services/authorization.service";
@@ -9,8 +8,9 @@ import { ExpenseModel } from "@/models/expense";
 import { ExpenseCategoryModel } from "@/models/expense-category";
 import { CashierShiftModel } from "@/models/cashier-shift";
 import { CashMovementModel } from "@/models/cash-movement";
-import { nextSequenceValue } from "@/models/sequence";
+import { dayKeyedNumber } from "@/models/sequence";
 import { paymentMethodLabel, isCashMethod, type PaymentMethod } from "@/lib/sales/constants";
+import { parseOrThrow } from "@/lib/validations/shared";
 import type {
   ExpenseInput,
   ExpenseCategoryInput,
@@ -51,15 +51,6 @@ export interface ExpenseDto {
 }
 
 const CATEGORY_FIELDS = "_id name active";
-
-/** Re-validates server-side (zod) and throws a VALIDATION AppError on failure. */
-function parseOrThrow<T>(schema: z.ZodType<T>, input: unknown): T {
-  const result = schema.safeParse(input);
-  if (!result.success) {
-    throw new AppError("VALIDATION", result.error.issues[0]?.message ?? "بيانات غير صحيحة");
-  }
-  return result.data;
-}
 
 async function loadCategory(id: string): Promise<{ _id: mongoose.Types.ObjectId; name: string; active: boolean }> {
   const category = await ExpenseCategoryModel.findById(id).select(CATEGORY_FIELDS).lean<{
@@ -269,9 +260,7 @@ export async function createExpense(
     }
 
     const now = new Date();
-    const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-    const seq = await nextSequenceValue(`expense-${dayKey}`, session);
-    const expenseNumber = `EXP-${dayKey}-${String(seq).padStart(4, "0")}`;
+    const expenseNumber = await dayKeyedNumber("EXP", "expense", session, now);
 
     const [expense] = await ExpenseModel.create(
       [

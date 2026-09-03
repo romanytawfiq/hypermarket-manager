@@ -10,6 +10,7 @@ import { SupplierLedgerModel } from "@/models/supplier-ledger";
 import { ExpenseModel } from "@/models/expense";
 import { CashMovementModel } from "@/models/cash-movement";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/sales/constants";
+import { round2 } from "@/lib/format";
 
 /**
  * Accounting overview (Phase 6).
@@ -200,8 +201,4 @@ export async function getAccountingOverview(
     netCashFlow: round2(cashIn - cashOut),
     salesByMethod,
   };
-}
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
 }

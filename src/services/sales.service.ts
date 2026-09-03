@@ -9,9 +9,10 @@ import { SaleModel, type Payment, type SaleDocument, type SalePaymentState } fro
 import { ProductModel } from "@/models/product";
 import { CustomerModel } from "@/models/customer";
 import { CustomerLedgerModel } from "@/models/customer-ledger";
-import { nextSequenceValue } from "@/models/sequence";
+import { dayKeyedNumber } from "@/models/sequence";
 import { consumeStockForSale, getSellableStock } from "@/services/inventory.service";
 import { isCashMethod, paymentMethodLabel, type PaymentMethod } from "@/lib/sales/constants";
+import { escapeRegExp } from "@/lib/utils";
 import type { SaleCreateInput } from "@/lib/validations/sales";
 import { getActiveShift } from "@/services/shift.service";
 
@@ -163,7 +164,7 @@ export async function posSearchProducts(
       }>
     >();
 
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const re = new RegExp(escapeRegExp(q), "i");
   const broad = await ProductModel.find({
     active: true,
     $or: [{ name: { $regex: re } }, { sku: { $regex: re } }, { barcode: { $regex: re } }],
@@ -383,9 +384,7 @@ export async function createSaleWithSession(
 
   // Concurrency-safe invoice number (atomic sequence).
   const now = new Date();
-  const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-  const seq = await nextSequenceValue(`sale-${dayKey}`, session);
-  const invoiceNumber = `${INVOICE_PREFIX}-${dayKey}-${String(seq).padStart(4, "0")}`;
+  const invoiceNumber = await dayKeyedNumber(INVOICE_PREFIX, "sale", session, now);
 
   const [sale] = await SaleModel.create(
     [

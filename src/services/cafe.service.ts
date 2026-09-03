@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
-import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { dbConnect, withTransaction } from "@/lib/db";
 import { requirePermission } from "@/services/authorization.service";
 import type { AuthUser } from "@/services/auth.service";
 import { recordAudit } from "@/services/audit.service";
-import { nextSequenceValue } from "@/models/sequence";
+import { nextSequenceValue, dayKeyedNumber } from "@/models/sequence";
 import { ProductModel } from "@/models/product";
 // Side-effect import: registers the Category model so `populate("category")`
 // below resolves even when catalog.service is not part of the same bundle.
@@ -13,6 +12,8 @@ import "@/models/category";
 import { CustomerModel } from "@/models/customer";
 import { createSaleWithSession } from "@/services/sales.service";
 import type { CafeSugarLevel } from "@/lib/cafe/sugar";
+import { escapeRegExp } from "@/lib/utils";
+import { parseOrThrow } from "@/lib/validations/shared";
 import {
   CafeOrderModel,
   CAFE_ORDER_STATUSES,
@@ -118,14 +119,6 @@ export interface CafeProductSearchDto {
 export interface CafeCustomerSearchDto {
   id: string;
   name: string;
-}
-
-function parseOrThrow<T>(schema: z.ZodType<T>, input: unknown): T {
-  const result = schema.safeParse(input);
-  if (!result.success) {
-    throw new AppError("VALIDATION", result.error.issues[0]?.message ?? "بيانات غير صحيحة");
-  }
-  return result.data;
 }
 
 function toCafeOrderDto(o: CafeOrderDocument): CafeOrderDto {
@@ -347,9 +340,7 @@ export async function createCafeOrder(
     const customerName = sale.customer?.name ?? "";
 
     const now = new Date();
-    const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-    const seq = await nextSequenceValue(`cafe-order-${dayKey}`, session);
-    const orderNumber = `CF-${dayKey}-${String(seq).padStart(4, "0")}`;
+    const orderNumber = await dayKeyedNumber("CF", "cafe-order", session, now);
 
     const [order] = await CafeOrderModel.create(
       [
@@ -569,7 +560,7 @@ export async function cafeSearchProducts(
   await dbConnect();
   const q = query.trim();
   if (!q) return [];
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const re = new RegExp(escapeRegExp(q), "i");
   const rows = await ProductModel.find({ active: true, $or: [{ name: { $regex: re } }, { sku: { $regex: re } }, { barcode: { $regex: re } }] })
     .populate({ path: "category", select: "supportsSugarOptions" })
     .sort({ name: 1 })
@@ -604,7 +595,7 @@ export async function cafeSearchCustomers(
   await dbConnect();
   const q = query.trim();
   if (!q) return [];
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const re = new RegExp(escapeRegExp(q), "i");
   const rows = await CustomerModel.find({ active: true, $or: [{ name: { $regex: re } }, { phone: { $regex: re } }] })
     .sort({ name: 1 })
     .limit(10)

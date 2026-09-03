@@ -7,8 +7,9 @@ import { recordAudit } from "@/services/audit.service";
 import { CustomerModel } from "@/models/customer";
 import { CustomerLedgerModel, type CustomerLedgerType } from "@/models/customer-ledger";
 import { CustomerPaymentModel } from "@/models/customer-payment";
-import { nextSequenceValue } from "@/models/sequence";
+import { dayKeyedNumber } from "@/models/sequence";
 import { paymentMethodLabel, type PaymentMethod } from "@/lib/sales/constants";
+import { escapeRegExp } from "@/lib/utils";
 import type { CustomerInput, CustomerPaymentInput } from "@/lib/validations/customers";
 
 /**
@@ -267,7 +268,7 @@ export async function posSearchCustomers(
   const q = query.trim();
   if (!q) return [];
 
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  const re = new RegExp(escapeRegExp(q), "i");
   const customers = await CustomerModel.find({
     active: true,
     $or: [{ name: { $regex: re } }, { phone: { $regex: re } }],
@@ -333,9 +334,7 @@ export async function createCustomerPayment(
     }
 
     const now = new Date();
-    const dayKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
-    const seq = await nextSequenceValue(`customer-payment-${dayKey}`, session);
-    const paymentNumber = `${PAYMENT_PREFIX}-${dayKey}-${String(seq).padStart(4, "0")}`;
+    const paymentNumber = await dayKeyedNumber(PAYMENT_PREFIX, "customer-payment", session, now);
 
     const [payment] = await CustomerPaymentModel.create(
       [

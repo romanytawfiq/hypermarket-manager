@@ -14,6 +14,7 @@ import { ProductBatchModel } from "@/models/product-batch";
 import { CashierShiftModel } from "@/models/cashier-shift";
 import { PAYMENT_METHODS, type PaymentMethod, isCashMethod } from "@/lib/sales/constants";
 import { isLowStock, isOutOfStock, isExpired, isExpiringSoon, EXPIRING_SOON_DAYS } from "@/lib/inventory/stock";
+import { round2 } from "@/lib/format";
 
 export type DashboardPeriod = "today" | "week" | "month" | "custom";
 
@@ -58,10 +59,6 @@ export function getPeriodRange(period: DashboardPeriod, customFrom?: string, cus
       return { label: "فترة مخصصة", from, to };
     }
   }
-}
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 function buildDateMatch(from: Date | null, to: Date | null): Record<string, unknown> {

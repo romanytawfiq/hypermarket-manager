@@ -9,6 +9,16 @@
 
 const CURRENCY_SUFFIX = "ج.م";
 
+/**
+ * Rounds a number to two decimal places (money-safe, uses epsilon).
+ *
+ * Centralized here so financial aggregations (dashboard, accounting, expenses)
+ * share the exact same rounding instead of each service redefining it locally.
+ */
+export function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 /** Formats an amount as "١٢٣٫٤٥ ج.م" (ar-EG numerals, 2 max decimals). */
 export function formatEgp(amount: number): string {
   const rounded = Math.round(amount * 100) / 100;
